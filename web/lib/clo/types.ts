@@ -198,6 +198,12 @@ export interface ExtractedConstraints {
   cmDetails?: CMDetails;
   // Section 24: CM Trading Constraints
   cmTradingConstraints?: { discretionarySales?: string; requiredSaleTypes?: string[]; postReinvestmentTrading?: string };
+  // Section 24b: Management of Portfolio
+  managementOfPortfolio?: string;
+  // Section 24c: Terms and Conditions of Sales
+  termsAndConditionsOfSales?: string;
+  // Section 24d: Trading Restrictions by Test Breach
+  tradingRestrictionsByTestBreach?: { testName: string; consequence: string }[];
   // Section 25: Refinancing History
   refinancingHistory?: { date: string; details: string }[];
   // Section 26: Additional Issuance
