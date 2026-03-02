@@ -34,7 +34,7 @@ export default function UpdateComplianceReport({ hasPortfolio }: { hasPortfolio:
 
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("files", file);
       formData.append("docType", "compliance");
 
       const uploadRes = await fetch("/api/clo/profile/upload", {
