@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
@@ -18,7 +18,21 @@ async function migrate() {
 
   try {
     await pool.query(schema);
-    console.log("Migration completed successfully.");
+    console.log("Schema applied.");
+
+    // Run numbered migration files in order
+    const migrationsDir = join(__dirname, "migrations");
+    const files = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+
+    for (const file of files) {
+      const sql = readFileSync(join(migrationsDir, file), "utf-8");
+      await pool.query(sql);
+      console.log(`Migration applied: ${file}`);
+    }
+
+    console.log("All migrations completed successfully.");
   } finally {
     await pool.end();
   }
