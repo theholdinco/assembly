@@ -36,10 +36,6 @@ export default async function CLOLayout({
                 <span className="ic-nav-icon">&#9670;</span>
                 Panel
               </Link>
-              <Link href="/clo/context" className="ic-nav-link">
-                <span className="ic-nav-icon">&#9670;</span>
-                Context
-              </Link>
               <Link href="/clo/waterfall" className="ic-nav-link">
                 <span className="ic-nav-icon">&#9670;</span>
                 Waterfall
@@ -57,6 +53,15 @@ export default async function CLOLayout({
         </nav>
 
         <div className="ic-sidebar-footer">
+          {profile && (
+            <Link
+              href="/clo/context"
+              className="ic-nav-link"
+              style={{ color: "var(--color-text-muted)", fontSize: "0.8rem", opacity: 0.7 }}
+            >
+              Context
+            </Link>
+          )}
           <Link href="/" className="ic-nav-link ic-nav-link-muted">
             &larr; Back to Panels
           </Link>
@@ -65,27 +70,6 @@ export default async function CLOLayout({
 
       <main className="ic-main">
         {children}
-        {profile && (
-          <Link
-            href="/clo/context"
-            style={{
-              position: "fixed",
-              bottom: "1.5rem",
-              left: "1.5rem",
-              padding: "0.4rem 0.8rem",
-              fontSize: "0.75rem",
-              color: "var(--color-text-muted)",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "var(--radius-sm)",
-              opacity: 0.7,
-              textDecoration: "none",
-              zIndex: 50,
-            }}
-          >
-            Edit Context
-          </Link>
-        )}
       </main>
     </div>
   );

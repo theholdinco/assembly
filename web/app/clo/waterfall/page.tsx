@@ -29,43 +29,36 @@ export default async function WaterfallPage() {
   }
 
   const profile = rowToProfile(profileRow as unknown as Record<string, unknown>);
+  const constraints = (profile.extractedConstraints || {}) as ExtractedConstraints;
   const deal = await getDealForProfile(profile.id);
 
-  if (!deal) {
-    return (
-      <div className="ic-dashboard">
-        <div className="ic-empty-state">
-          <h1>Waterfall Model</h1>
-          <p>No deal data available. Upload a compliance report to get started.</p>
-        </div>
-      </div>
-    );
-  }
+  // Fetch report-level data if a deal record exists
+  const reportPeriod = deal ? await getLatestReportPeriod(deal.id) : null;
 
-  const reportPeriod = await getLatestReportPeriod(deal.id);
+  const [waterfallSteps, tranches, trancheSnapshots, periodData, accountBalances] =
+    await Promise.all([
+      reportPeriod ? getWaterfallSteps(reportPeriod.id) : Promise.resolve([]),
+      deal ? getTranches(deal.id) : Promise.resolve([]),
+      reportPeriod ? getTrancheSnapshots(reportPeriod.id) : Promise.resolve([]),
+      reportPeriod ? getReportPeriodData(reportPeriod.id) : Promise.resolve(null),
+      reportPeriod ? getAccountBalances(reportPeriod.id) : Promise.resolve([]),
+    ]);
 
-  const [
-    waterfallSteps,
-    tranches,
-    trancheSnapshots,
-    periodData,
-    accountBalances,
-  ] = await Promise.all([
-    reportPeriod ? getWaterfallSteps(reportPeriod.id) : Promise.resolve([]),
-    getTranches(deal.id),
-    reportPeriod ? getTrancheSnapshots(reportPeriod.id) : Promise.resolve([]),
-    reportPeriod ? getReportPeriodData(reportPeriod.id) : Promise.resolve(null),
-    reportPeriod ? getAccountBalances(reportPeriod.id) : Promise.resolve([]),
-  ]);
-
-  const constraints = (profile.extractedConstraints || {}) as ExtractedConstraints;
   const panel = await getPanelForUser(session.user.id);
+
+  // Resolve deal dates — prefer clo_deals, fall back to extractedConstraints
+  const dealName =
+    deal?.dealName ?? constraints.dealIdentity?.dealName ?? null;
+  const maturityDate =
+    deal?.statedMaturityDate ?? constraints.keyDates?.maturityDate ?? null;
+  const reinvestmentPeriodEnd =
+    deal?.reinvestmentPeriodEnd ?? constraints.keyDates?.reinvestmentPeriodEnd ?? null;
 
   // Build deal context for AI features
   const dealContext = {
-    dealName: deal.dealName,
-    maturityDate: deal.statedMaturityDate,
-    reinvestmentPeriodEnd: deal.reinvestmentPeriodEnd,
+    dealName,
+    maturityDate,
+    reinvestmentPeriodEnd,
     poolSummary: periodData?.poolSummary ?? null,
     complianceTests: periodData?.complianceTests ?? [],
     tranches,
@@ -77,12 +70,24 @@ export default async function WaterfallPage() {
 
   return (
     <div className="ic-dashboard" style={{ maxWidth: "1200px" }}>
-      <h1 style={{ fontFamily: "var(--font-display)", marginBottom: "0.5rem", letterSpacing: "-0.01em" }}>
+      <h1
+        style={{
+          fontFamily: "var(--font-display)",
+          marginBottom: "0.5rem",
+          letterSpacing: "-0.01em",
+        }}
+      >
         Waterfall Model
       </h1>
-      {deal.dealName && (
-        <p style={{ color: "var(--color-text-muted)", marginBottom: "2rem", fontSize: "0.9rem" }}>
-          {deal.dealName}
+      {dealName && (
+        <p
+          style={{
+            color: "var(--color-text-muted)",
+            marginBottom: "2rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          {dealName}
           {reportPeriod && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
               {" "}&middot; {reportPeriod.reportDate}
@@ -91,9 +96,7 @@ export default async function WaterfallPage() {
         </p>
       )}
 
-      {panel && (
-        <DataQualityCheck panelId={panel.id} dealContext={dealContext} />
-      )}
+      {panel && <DataQualityCheck panelId={panel.id} dealContext={dealContext} />}
 
       <WaterfallVisualization
         waterfallSteps={waterfallSteps}
@@ -103,7 +106,8 @@ export default async function WaterfallPage() {
       />
 
       <ProjectionModel
-        deal={deal}
+        maturityDate={maturityDate}
+        reinvestmentPeriodEnd={reinvestmentPeriodEnd}
         tranches={tranches}
         trancheSnapshots={trancheSnapshots}
         poolSummary={periodData?.poolSummary ?? null}

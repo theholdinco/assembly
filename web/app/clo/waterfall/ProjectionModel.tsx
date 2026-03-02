@@ -3,7 +3,6 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import type {
-  CloDeal,
   CloTranche,
   CloTrancheSnapshot,
   CloPoolSummary,
@@ -19,7 +18,8 @@ import {
 import SuggestAssumptions from "./SuggestAssumptions";
 
 interface Props {
-  deal: CloDeal;
+  maturityDate: string | null;
+  reinvestmentPeriodEnd: string | null;
   tranches: CloTranche[];
   trancheSnapshots: CloTrancheSnapshot[];
   poolSummary: CloPoolSummary | null;
@@ -70,8 +70,43 @@ const MODEL_ASSUMPTIONS = [
   },
 ];
 
+function parseAmount(s: string | undefined | null): number {
+  if (!s) return 0;
+  const cleaned = s.replace(/[^0-9.]/g, "");
+  return parseFloat(cleaned) || 0;
+}
+
+function buildTranchesFromConstraints(constraints: ExtractedConstraints) {
+  const entries = constraints.capitalStructure ?? [];
+  if (entries.length === 0) return [];
+
+  // Deduplicate by class name — keep the entry with the most data (has principalAmount and spread)
+  const byClass = new Map<string, typeof entries[number]>();
+  for (const e of entries) {
+    const existing = byClass.get(e.class);
+    if (!existing || (parseAmount(e.principalAmount) > 0 && (!existing.principalAmount || parseAmount(existing.principalAmount) === 0))) {
+      byClass.set(e.class, e);
+    }
+  }
+
+  return Array.from(byClass.values()).map((e, idx) => {
+    const isSubordinated = e.isSubordinated ?? e.class.toLowerCase().includes("sub");
+    const isFloating = e.rateType?.toLowerCase().includes("float") ??
+      (e.spread?.toLowerCase().includes("euribor") || e.spread?.toLowerCase().includes("sofr") || false);
+    return {
+      className: e.class,
+      currentBalance: parseAmount(e.principalAmount),
+      spreadBps: e.spreadBps ?? 0,
+      seniorityRank: idx + 1,
+      isFloating,
+      isIncomeNote: isSubordinated,
+    };
+  });
+}
+
 export default function ProjectionModel({
-  deal,
+  maturityDate,
+  reinvestmentPeriodEnd,
   tranches,
   trancheSnapshots,
   poolSummary,
@@ -80,28 +115,43 @@ export default function ProjectionModel({
   panelId,
   dealContext,
 }: Props) {
-  const ocTriggers = complianceTests
+  const ocTriggersFromTests = complianceTests
     .filter((t) => t.testType === "OC_PAR" && t.triggerLevel !== null && t.testClass)
     .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
 
-  const icTriggers = complianceTests
+  const icTriggersFromTests = complianceTests
     .filter((t) => t.testType === "IC" && t.triggerLevel !== null && t.testClass)
     .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
 
+  // Fall back to extractedConstraints coverage tests if no compliance test records
+  const ocTriggers = ocTriggersFromTests.length > 0
+    ? ocTriggersFromTests
+    : (constraints.coverageTestEntries ?? [])
+        .filter((e) => e.parValueRatio && parseFloat(e.parValueRatio))
+        .map((e) => ({ className: e.class, triggerLevel: parseFloat(e.parValueRatio!) }));
+
+  const icTriggers = icTriggersFromTests.length > 0
+    ? icTriggersFromTests
+    : (constraints.coverageTestEntries ?? [])
+        .filter((e) => e.interestCoverageRatio && parseFloat(e.interestCoverageRatio))
+        .map((e) => ({ className: e.class, triggerLevel: parseFloat(e.interestCoverageRatio!) }));
+
   const snapshotByTrancheId = new Map(trancheSnapshots.map((s) => [s.trancheId, s]));
-  const trancheInputs = tranches
-    .sort((a, b) => (a.seniorityRank ?? 99) - (b.seniorityRank ?? 99))
-    .map((t) => {
-      const snap = snapshotByTrancheId.get(t.id);
-      return {
-        className: t.className,
-        currentBalance: snap?.currentBalance ?? t.originalBalance ?? 0,
-        spreadBps: t.spreadBps ?? 0,
-        seniorityRank: t.seniorityRank ?? 99,
-        isFloating: t.isFloating ?? true,
-        isIncomeNote: t.isIncomeNote ?? false,
-      };
-    });
+  const trancheInputs = tranches.length > 0
+    ? tranches
+        .sort((a, b) => (a.seniorityRank ?? 99) - (b.seniorityRank ?? 99))
+        .map((t) => {
+          const snap = snapshotByTrancheId.get(t.id);
+          return {
+            className: t.className,
+            currentBalance: snap?.currentBalance ?? t.originalBalance ?? 0,
+            spreadBps: t.spreadBps ?? 0,
+            seniorityRank: t.seniorityRank ?? 99,
+            isFloating: t.isFloating ?? true,
+            isIncomeNote: t.isIncomeNote ?? false,
+          };
+        })
+    : buildTranchesFromConstraints(constraints);
 
   const [cdrPct, setCdrPct] = useState(2);
   const [cprPct, setCprPct] = useState(15);
@@ -122,8 +172,8 @@ export default function ProjectionModel({
       tranches: trancheInputs,
       ocTriggers,
       icTriggers,
-      reinvestmentPeriodEnd: deal.reinvestmentPeriodEnd,
-      maturityDate: deal.statedMaturityDate,
+      reinvestmentPeriodEnd,
+      maturityDate,
       currentDate: new Date().toISOString().slice(0, 10),
       cdrPct,
       cprPct,
@@ -133,7 +183,7 @@ export default function ProjectionModel({
     }),
     [
       poolSummary, baseRatePct, seniorFeePct, trancheInputs, ocTriggers, icTriggers,
-      deal, cdrPct, cprPct, recoveryPct, recoveryLagMonths, reinvestmentSpreadBps,
+      maturityDate, reinvestmentPeriodEnd, cdrPct, cprPct, recoveryPct, recoveryLagMonths, reinvestmentSpreadBps,
     ]
   );
 

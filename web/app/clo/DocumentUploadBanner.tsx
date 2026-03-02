@@ -105,8 +105,9 @@ export default function DocumentUploadBanner() {
       await fetch("/api/clo/profile/extract", { method: "POST" });
     }
 
-    // Queue portfolio extraction only if compliance files uploaded
+    // Queue compliance report extraction + portfolio extraction if compliance files uploaded
     if (complianceFiles.length > 0) {
+      fetch("/api/clo/report/extract", { method: "POST" }).catch(() => {});
       fetch("/api/clo/profile/extract-portfolio", { method: "POST" }).catch(() => {});
     }
 
