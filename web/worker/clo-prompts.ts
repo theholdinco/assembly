@@ -652,7 +652,9 @@ Return a single JSON object (no markdown fences, no explanation) containing ONLY
   "collateralQualityTests": [ ...ONLY tests the first pass missed... ],
   "coverageTestEntries": [ ...ONLY classes the first pass missed... ],
   "reinvestmentCriteria": { ...ONLY if first pass missed or incomplete... },
-  "ratingAgencyParameters": { ...ONLY if first pass missed fields... }
+  "ratingAgencyParameters": { ...ONLY if first pass missed fields... },
+  "managementOfPortfolio": "ONLY if first pass missed or under-captured the Management of the Portfolio section. Extract the FULL section including: PM authority and scope, permitted activities, investment guidelines, restrictions, discretionary powers.",
+  "termsAndConditionsOfSales": "ONLY if first pass missed or under-captured. Extract: sale conditions, requirements for discretionary/credit-risk/credit-improved sales, notice periods, pricing requirements, permitted sale types."
 }
 
 WHERE TO LOOK — these sections are commonly buried in:
@@ -661,6 +663,8 @@ WHERE TO LOOK — these sections are commonly buried in:
 - **ESG Exclusion Schedule** — usually a dedicated annex with 15-30 categories including specific revenue thresholds (e.g., "thermal coal mining >1% revenue", "Arctic oil/gas exploration any revenue", "palm oil >5% revenue"). Often has both direct involvement and revenue-based thresholds.
 - **Defined Terms** — terms like "Eligible Collateral Obligation", "Collateral Quality Test", "Fitch Test Matrix" often contain additional constraints within their definitions
 - **Conditional/tiered limits** — many tests have exceptions like "max 2.5% per obligor, except up to 3 obligors may be at 3.0%" — include the full conditional language
+- **Management of the Portfolio** — usually a dedicated section (often Chapter/Article titled "Management of the Collateral" or "The Portfolio Manager" or "Collateral Management"). Contains PM authority, trading guidelines, investment restrictions.
+- **Terms and Conditions of Sales** — often near the trading/sales sections. Describes conditions under which the PM can sell assets, including discretionary sales, credit-risk sales, credit-improved sales.
 
 COUNTING CHECK: A typical European CLO PPM has:
 - 30-45 eligibility criteria (if first pass has <25, you're likely missing some)
