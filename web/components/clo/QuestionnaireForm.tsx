@@ -2,13 +2,12 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { crossReferenceTests } from "@/lib/clo/cross-reference";
 import type {
   ExtractedConstraints,
   CapitalStructureEntry,
-  CoverageTestEntry,
   FeeEntry,
   KeyParty,
-  CollateralQualityTest,
 } from "@/lib/clo/types";
 
 const STEPS = [
@@ -81,14 +80,6 @@ function CollapsibleSection({
       {open && <div style={{ padding: "0.6rem 0.8rem", borderTop: "1px solid var(--color-border)" }}>{children}</div>}
     </div>
   );
-}
-
-// --- Helper: count populated fields in an object ---
-function countFields(obj: Record<string, unknown> | undefined | null): string {
-  if (!obj) return "0 fields";
-  const total = Object.keys(obj).length;
-  const filled = Object.values(obj).filter((v) => v != null && v !== "").length;
-  return `${filled}/${total} fields`;
 }
 
 // --- Helper: KeyValue grid for flat objects ---
@@ -356,53 +347,64 @@ export default function QuestionnaireForm() {
 
   // --- Render helpers for step 1 ---
 
-  function renderDealOverview() {
-    const hasDealIdentity = c.dealIdentity && Object.values(c.dealIdentity).some((v) => v);
-    const hasKeyDates = c.keyDates && Object.values(c.keyDates).some((v) => v);
-    const hasCapStruct = c.capitalStructure && c.capitalStructure.length > 0;
-    const hasDealSizing = c.dealSizing && Object.values(c.dealSizing).some((v) => v);
-    const hasLegacyDeal = c.targetParAmount || c.collateralManager || c.issuer || c.maturityDate;
-    const hasLegacyDates = c.reinvestmentPeriod || c.nonCallPeriod || c.paymentDates;
+  function renderHeader() {
+    const dealName = c.dealIdentity?.dealName;
+    const cm = c.cmDetails?.name || c.collateralManager;
+    const issuer = c.dealIdentity?.issuerLegalName || c.issuer;
+    const rpEnd = c.keyDates?.reinvestmentPeriodEnd || c.reinvestmentPeriod?.end;
+    const ncEnd = c.keyDates?.nonCallPeriodEnd || c.nonCallPeriod?.end;
+    const maturity = c.keyDates?.maturityDate || c.maturityDate;
+    const payFreq = c.keyDates?.paymentFrequency || c.paymentDates;
 
-    const itemCount = [hasDealIdentity, hasKeyDates, hasCapStruct, hasDealSizing || hasLegacyDeal, hasLegacyDates].filter(Boolean).length;
-    if (itemCount === 0) return null;
+    const hasRow1 = dealName || cm || issuer;
+    const hasRow2 = rpEnd || ncEnd || maturity || payFreq;
+    if (!hasRow1 && !hasRow2) return null;
 
     return (
-      <CollapsibleSection title="Deal Overview" badge={`${itemCount} sections`} defaultOpen>
-        {hasDealIdentity && <KeyValueGrid data={c.dealIdentity!} label="Deal Identity" />}
-
-        {hasKeyDates && <KeyValueGrid data={c.keyDates!} label="Key Dates" />}
-
-        {!hasKeyDates && hasLegacyDates && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-            {c.reinvestmentPeriod && (
-              <div className="ic-field">
-                <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Reinvestment Period</label>
-                <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
-                  value={`${c.reinvestmentPeriod.start || ""} - ${c.reinvestmentPeriod.end || ""}`} readOnly />
-              </div>
-            )}
-            {c.nonCallPeriod?.end && (
-              <div className="ic-field">
-                <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Non-Call Period End</label>
-                <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
-                  value={c.nonCallPeriod.end} readOnly />
-              </div>
-            )}
+      <div style={{ padding: "0.5rem 0.8rem", marginBottom: "0.5rem", fontSize: "0.85rem", borderBottom: "1px solid var(--color-border)" }}>
+        {hasRow1 && (
+          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: hasRow2 ? "0.3rem" : 0 }}>
+            {dealName && <span><strong>Deal:</strong> {dealName}</span>}
+            {cm && <span><strong>CM:</strong> {cm}</span>}
+            {issuer && <span><strong>Issuer:</strong> {issuer}</span>}
           </div>
         )}
+        {hasRow2 && (
+          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", color: "var(--color-text-secondary)", fontSize: "0.8rem" }}>
+            {rpEnd && <span>RP End: {rpEnd}</span>}
+            {ncEnd && <span>NC End: {ncEnd}</span>}
+            {maturity && <span>Maturity: {maturity}</span>}
+            {payFreq && <span>Pay Freq: {payFreq}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
+  function renderCapitalStructure() {
+    const hasCapStruct = c.capitalStructure && c.capitalStructure.length > 0;
+    const hasDealSizing = c.dealSizing && Object.values(c.dealSizing).some((v) => v);
+    const hasLegacyPar = !!c.targetParAmount;
+    if (!hasCapStruct && !hasDealSizing && !hasLegacyPar) return null;
+
+    return (
+      <CollapsibleSection title="Capital Structure" defaultOpen>
         {hasCapStruct && (
           <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Capital Structure ({(c.capitalStructure as CapitalStructureEntry[]).length} tranches)</label>
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>
+              Tranches ({(c.capitalStructure as CapitalStructureEntry[]).length})
+            </label>
             <div style={{ fontSize: "0.8rem", overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
                     <th style={{ textAlign: "left", padding: "0.3rem" }}>Class</th>
-                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Amount</th>
-                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Spread</th>
-                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Rating</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Designation</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Principal Amount</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Rate Type</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Spread (bps)</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>Fitch</th>
+                    <th style={{ textAlign: "left", padding: "0.3rem" }}>S&P</th>
                     <th style={{ textAlign: "left", padding: "0.3rem" }}>Deferrable</th>
                   </tr>
                 </thead>
@@ -410,9 +412,12 @@ export default function QuestionnaireForm() {
                   {(c.capitalStructure as CapitalStructureEntry[]).map((t, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
                       <td style={{ padding: "0.3rem" }}>{t.class}</td>
+                      <td style={{ padding: "0.3rem" }}>{t.designation || "—"}</td>
                       <td style={{ padding: "0.3rem" }}>{t.principalAmount}</td>
-                      <td style={{ padding: "0.3rem" }}>{t.spread}</td>
-                      <td style={{ padding: "0.3rem" }}>{t.rating?.fitch || ""}/{t.rating?.sp || ""}</td>
+                      <td style={{ padding: "0.3rem" }}>{t.rateType || "—"}</td>
+                      <td style={{ padding: "0.3rem" }}>{t.spreadBps != null ? t.spreadBps : t.spread || "—"}</td>
+                      <td style={{ padding: "0.3rem" }}>{t.rating?.fitch || "—"}</td>
+                      <td style={{ padding: "0.3rem" }}>{t.rating?.sp || "—"}</td>
                       <td style={{ padding: "0.3rem" }}>{t.deferrable ? "Yes" : "No"}</td>
                     </tr>
                   ))}
@@ -422,78 +427,85 @@ export default function QuestionnaireForm() {
           </div>
         )}
 
-        {(hasDealSizing || hasLegacyDeal) && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
-            {(c.dealSizing?.targetParAmount || c.targetParAmount) && (
-              <div className="ic-field">
-                <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Target Par</label>
-                <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
-                  value={(c.dealSizing?.targetParAmount ?? c.targetParAmount) || ""}
-                  onChange={(e) => updateConstraint("targetParAmount", e.target.value)} />
-              </div>
-            )}
-            {(c.cmDetails?.name || c.collateralManager) && (
-              <div className="ic-field">
-                <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Collateral Manager</label>
-                <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
-                  value={(c.cmDetails?.name ?? c.collateralManager) || ""} readOnly />
-              </div>
-            )}
-            {(c.keyDates?.maturityDate || c.maturityDate) && (
-              <div className="ic-field">
-                <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Maturity Date</label>
-                <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
-                  value={(c.keyDates?.maturityDate ?? c.maturityDate) || ""} readOnly />
-              </div>
-            )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem", marginTop: "0.5rem" }}>
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Target Par</label>
+            <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
+              value={(c.dealSizing?.targetParAmount ?? c.targetParAmount) || ""}
+              onChange={(e) => updateConstraint("targetParAmount", e.target.value)}
+              placeholder="e.g., $400,000,000" />
           </div>
-        )}
+          {c.dealSizing?.totalRatedNotes && (
+            <div className="ic-field">
+              <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Total Rated Notes</label>
+              <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
+                value={c.dealSizing.totalRatedNotes} readOnly />
+            </div>
+          )}
+          {c.dealSizing?.equityPctOfDeal && (
+            <div className="ic-field">
+              <label className="ic-field-label" style={{ fontSize: "0.8rem" }}>Equity %</label>
+              <input className="ic-textarea" style={{ padding: "0.4rem", fontSize: "0.85rem" }}
+                value={c.dealSizing.equityPctOfDeal} readOnly />
+            </div>
+          )}
+        </div>
       </CollapsibleSection>
     );
   }
 
-  function renderTestsAndConstraints() {
-    const hasCoverage = (c.coverageTestEntries?.length ?? 0) > 0 || (c.coverageTests && Object.keys(c.coverageTests).length > 0);
-    const hasQuality = Array.isArray(c.collateralQualityTests) ? c.collateralQualityTests.length > 0 : (c.collateralQualityTests && Object.keys(c.collateralQualityTests).length > 0);
-    const hasProfile = c.portfolioProfileTests && Object.keys(c.portfolioProfileTests).length > 0;
-    const hasConc = c.concentrationLimits && Object.keys(c.concentrationLimits).length > 0;
-    const hasEligibility = (c.eligibilityCriteria?.length ?? 0) > 0 || c.eligibleCollateral;
-    const hasReinvestment = c.reinvestmentCriteria;
-    const hasMetrics = c.warfLimit != null || c.wasMinimum != null || c.walMaximum != null || c.diversityScoreMinimum != null;
+  function renderComplianceTests() {
+    const { coverageTests } = crossReferenceTests(c);
+    const hasLegacyCoverage = c.coverageTests && Object.keys(c.coverageTests).length > 0;
+    const hasReinvOc = !!c.reinvestmentOcTest;
 
-    const sectionCount = [hasCoverage, hasQuality, hasProfile || hasConc, hasEligibility, hasReinvestment, hasMetrics].filter(Boolean).length;
-    if (sectionCount === 0) return null;
+    if (coverageTests.length === 0 && !hasLegacyCoverage && !hasReinvOc) return null;
+
+    const hasActuals = coverageTests.some((t) => t.actualValue != null);
 
     return (
-      <CollapsibleSection title="Tests & Constraints" badge={`${sectionCount} sections`} defaultOpen>
-        {/* Coverage Tests */}
-        {c.coverageTestEntries && c.coverageTestEntries.length > 0 ? (
+      <CollapsibleSection title="Compliance & Coverage Tests" defaultOpen>
+        {coverageTests.length > 0 && (
           <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Coverage Tests ({c.coverageTestEntries.length} classes)</label>
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Coverage Tests ({coverageTests.length})</label>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Test Name</th>
                   <th style={{ textAlign: "left", padding: "0.3rem" }}>Class</th>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>OC Ratio</th>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>IC Ratio</th>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>PPM Trigger</th>
+                  {hasActuals && <th style={{ textAlign: "left", padding: "0.3rem" }}>Actual Value</th>}
+                  {hasActuals && <th style={{ textAlign: "left", padding: "0.3rem" }}>Pass/Fail</th>}
                 </tr>
               </thead>
               <tbody>
-                {(c.coverageTestEntries as CoverageTestEntry[]).map((t, i) => (
+                {coverageTests.map((t, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                    <td style={{ padding: "0.3rem" }}>{t.class}</td>
-                    <td style={{ padding: "0.3rem" }}>{t.parValueRatio || "—"}</td>
-                    <td style={{ padding: "0.3rem" }}>{t.interestCoverageRatio || "—"}</td>
+                    <td style={{ padding: "0.3rem" }}>{t.testName}</td>
+                    <td style={{ padding: "0.3rem" }}>{t.testClass || "—"}</td>
+                    <td style={{ padding: "0.3rem" }}>{t.ppmTrigger || "—"}</td>
+                    {hasActuals && <td style={{ padding: "0.3rem" }}>{t.actualValue != null ? t.actualValue : "—"}</td>}
+                    {hasActuals && (
+                      <td style={{ padding: "0.3rem" }}>
+                        {t.isPassing == null ? "—" : (
+                          <span style={{ color: t.isPassing ? "var(--color-success, #22c55e)" : "var(--color-error, #ef4444)", fontWeight: 600 }}>
+                            {t.isPassing ? "Pass" : "Fail"}
+                          </span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : hasCoverage ? (
+        )}
+
+        {coverageTests.length === 0 && hasLegacyCoverage && (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Coverage Tests</label>
             <textarea className="ic-textarea" rows={4}
-              value={c.coverageTests ? Object.entries(c.coverageTests).map(([k, v]) => `${k}: ${v}`).join("\n") : ""}
+              value={Object.entries(c.coverageTests!).map(([k, v]) => `${k}: ${v}`).join("\n")}
               onChange={(e) => {
                 const tests: Record<string, string> = {};
                 e.target.value.split("\n").forEach((line) => {
@@ -501,116 +513,88 @@ export default function QuestionnaireForm() {
                   if (key && vals.length) tests[key.trim()] = vals.join(":").trim();
                 });
                 updateConstraint("coverageTests", tests);
-              }}
-              placeholder="parValueClassAB: 130.13%&#10;interestCoverageClassAB: 120%" />
+              }} />
           </div>
-        ) : null}
+        )}
 
-        {/* Collateral Quality Tests */}
-        {Array.isArray(c.collateralQualityTests) && c.collateralQualityTests.length > 0 ? (
+        {hasReinvOc && (
           <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Collateral Quality Tests ({(c.collateralQualityTests as CollateralQualityTest[]).length} tests)</label>
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Reinvestment OC Test</label>
+            <div style={{ fontSize: "0.8rem" }}>
+              {c.reinvestmentOcTest!.trigger && <div>Trigger: {c.reinvestmentOcTest!.trigger}</div>}
+              {c.reinvestmentOcTest!.appliesDuring && <div>Applies During: {c.reinvestmentOcTest!.appliesDuring}</div>}
+              {c.reinvestmentOcTest!.diversionAmount && <div>Diversion Amount: {c.reinvestmentOcTest!.diversionAmount}</div>}
+              {c.reinvestmentOcTest!.diversionOptions && <div>Diversion Options: {c.reinvestmentOcTest!.diversionOptions}</div>}
+            </div>
+          </div>
+        )}
+      </CollapsibleSection>
+    );
+  }
+
+  function renderProfileTests() {
+    const { qualityAndProfileTests } = crossReferenceTests(c);
+    const hasMetrics = c.warfLimit != null || c.wasMinimum != null || c.walMaximum != null || c.diversityScoreMinimum != null;
+
+    if (qualityAndProfileTests.length === 0 && !hasMetrics) return null;
+
+    const hasActuals = qualityAndProfileTests.some((t) => t.actualValue != null);
+
+    return (
+      <CollapsibleSection title="Portfolio Profile & Quality Tests" defaultOpen>
+        {qualityAndProfileTests.length > 0 && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Tests ({qualityAndProfileTests.length})</label>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Test</th>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Agency</th>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Value</th>
-                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Applies</th>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Test Name</th>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Min Limit</th>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Max Limit</th>
+                  {hasActuals && <th style={{ textAlign: "left", padding: "0.3rem" }}>Actual Value</th>}
+                  {hasActuals && <th style={{ textAlign: "left", padding: "0.3rem" }}>Pass/Fail</th>}
                 </tr>
               </thead>
               <tbody>
-                {(c.collateralQualityTests as CollateralQualityTest[]).map((t, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                    <td style={{ padding: "0.3rem" }}>{t.name}</td>
-                    <td style={{ padding: "0.3rem" }}>{t.agency || "—"}</td>
-                    <td style={{ padding: "0.3rem" }}>{t.value != null ? String(t.value) : "—"}</td>
-                    <td style={{ padding: "0.3rem" }}>{t.appliesDuring || "—"}</td>
-                  </tr>
-                ))}
+                {qualityAndProfileTests.map((t, i) => {
+                  let minLimit = "—";
+                  let maxLimit = "—";
+                  if (t.source === "profile" && t.ppmTrigger) {
+                    const parts = t.ppmTrigger.split("–").map((s) => s.trim());
+                    if (parts.length === 2) {
+                      minLimit = parts[0] || "—";
+                      maxLimit = parts[1] || "—";
+                    } else {
+                      maxLimit = t.ppmTrigger;
+                    }
+                  } else if (t.source === "quality" && t.ppmTrigger) {
+                    maxLimit = t.ppmTrigger;
+                  }
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                      <td style={{ padding: "0.3rem" }}>{t.testName}</td>
+                      <td style={{ padding: "0.3rem" }}>{minLimit}</td>
+                      <td style={{ padding: "0.3rem" }}>{maxLimit}</td>
+                      {hasActuals && <td style={{ padding: "0.3rem" }}>{t.actualValue != null ? t.actualValue : "—"}</td>}
+                      {hasActuals && (
+                        <td style={{ padding: "0.3rem" }}>
+                          {t.isPassing == null ? "—" : (
+                            <span style={{ color: t.isPassing ? "var(--color-success, #22c55e)" : "var(--color-error, #ef4444)", fontWeight: 600 }}>
+                              {t.isPassing ? "Pass" : "Fail"}
+                            </span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        ) : hasQuality && !Array.isArray(c.collateralQualityTests) ? (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Collateral Quality Tests</label>
-            <textarea className="ic-textarea" rows={3}
-              value={Object.entries(c.collateralQualityTests as unknown as Record<string, unknown>).filter(([, v]) => v != null).map(([k, v]) => `${k}: ${v}`).join("\n")}
-              readOnly />
-          </div>
-        ) : null}
-
-        {/* Portfolio Profile Tests */}
-        {hasProfile ? (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>
-              Portfolio Profile Tests ({Object.keys(c.portfolioProfileTests!).length} tests)
-            </label>
-            <textarea
-              className="ic-textarea" rows={8}
-              value={Object.entries(c.portfolioProfileTests!)
-                .map(([k, v]) => `${k}: min ${v.min || "N/A"}, max ${v.max || "N/A"}`)
-                .join("\n")}
-              onChange={(e) => {
-                const tests: Record<string, { min?: string | null; max?: string | null }> = {};
-                e.target.value.split("\n").forEach((line) => {
-                  const match = line.match(/^(.+?):\s*min\s+(.+?),\s*max\s+(.+)$/);
-                  if (match) {
-                    tests[match[1].trim()] = {
-                      min: match[2].trim() === "N/A" ? null : match[2].trim(),
-                      max: match[3].trim() === "N/A" ? null : match[3].trim(),
-                    };
-                  }
-                });
-                updateConstraint("portfolioProfileTests", tests);
-              }} />
-          </div>
-        ) : hasConc ? (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Concentration Limits</label>
-            <textarea className="ic-textarea" rows={3}
-              value={Object.entries(c.concentrationLimits!).map(([k, v]) => `${k}: ${v}`).join("\n")}
-              onChange={(e) => {
-                const limits: Record<string, string> = {};
-                e.target.value.split("\n").forEach((line) => {
-                  const [key, ...vals] = line.split(":");
-                  if (key && vals.length) limits[key.trim()] = vals.join(":").trim();
-                });
-                updateConstraint("concentrationLimits", limits);
-              }} />
-          </div>
-        ) : null}
-
-        {/* Eligibility Criteria */}
-        {c.eligibilityCriteria && c.eligibilityCriteria.length > 0 ? (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>
-              Eligibility Criteria ({c.eligibilityCriteria.length} items)
-            </label>
-            <textarea className="ic-textarea" rows={6}
-              value={c.eligibilityCriteria.join("\n")}
-              onChange={(e) => {
-                const items = e.target.value.split("\n").filter((l) => l.trim());
-                updateConstraint("eligibilityCriteria", items);
-              }} />
-          </div>
-        ) : c.eligibleCollateral ? (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Eligible Collateral</label>
-            <textarea className="ic-textarea" rows={2}
-              value={c.eligibleCollateral || ""}
-              onChange={(e) => updateConstraint("eligibleCollateral", e.target.value)} />
-          </div>
-        ) : null}
-
-        {/* Reinvestment Criteria */}
-        {hasReinvestment && (
-          <KeyValueGrid data={c.reinvestmentCriteria!} label="Reinvestment Criteria" />
         )}
 
-        {/* Key Metrics */}
         {hasMetrics && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginTop: "0.5rem" }}>
             <div className="ic-field">
               <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>WARF Limit</label>
               <input className="ic-textarea" style={{ padding: "0.5rem" }}
@@ -645,23 +629,151 @@ export default function QuestionnaireForm() {
     );
   }
 
-  function renderStructureAndMechanics() {
+  function renderTradingConstraints() {
+    const hasCmTrading = c.cmTradingConstraints && Object.values(c.cmTradingConstraints).some((v) => v != null);
+    const hasConc = c.concentrationLimits && Object.keys(c.concentrationLimits).length > 0;
+    const hasTradingRestrictions = (c.tradingRestrictionsByTestBreach?.length ?? 0) > 0;
+
+    if (!hasCmTrading && !hasConc && !hasTradingRestrictions) return null;
+
+    return (
+      <CollapsibleSection title="Trading Constraints" defaultOpen>
+        {hasCmTrading && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>CM Trading Constraints</label>
+            <div style={{ fontSize: "0.8rem" }}>
+              {c.cmTradingConstraints!.discretionarySales && <div>Discretionary Sales: {c.cmTradingConstraints!.discretionarySales}</div>}
+              {c.cmTradingConstraints!.requiredSaleTypes?.length && <div>Required Sale Types: {c.cmTradingConstraints!.requiredSaleTypes.join(", ")}</div>}
+              {c.cmTradingConstraints!.postReinvestmentTrading && <div>Post-RP Trading: {c.cmTradingConstraints!.postReinvestmentTrading}</div>}
+            </div>
+          </div>
+        )}
+
+        {hasConc && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Concentration Limits</label>
+            <textarea className="ic-textarea" rows={4}
+              value={Object.entries(c.concentrationLimits!).map(([k, v]) => `${k}: ${v}`).join("\n")}
+              onChange={(e) => {
+                const limits: Record<string, string> = {};
+                e.target.value.split("\n").forEach((line) => {
+                  const [key, ...vals] = line.split(":");
+                  if (key && vals.length) limits[key.trim()] = vals.join(":").trim();
+                });
+                updateConstraint("concentrationLimits", limits);
+              }} />
+          </div>
+        )}
+
+        {hasTradingRestrictions && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Trading Restrictions by Test Breach</label>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Test</th>
+                  <th style={{ textAlign: "left", padding: "0.3rem" }}>Consequence When Breached</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.tradingRestrictionsByTestBreach!.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                    <td style={{ padding: "0.3rem" }}>{r.testName}</td>
+                    <td style={{ padding: "0.3rem" }}>{r.consequence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CollapsibleSection>
+    );
+  }
+
+  function renderAdditionalContext() {
+    const hasEligibility = (c.eligibilityCriteria?.length ?? 0) > 0 || !!c.eligibleCollateral;
+    const hasManagement = !!c.managementOfPortfolio;
+    const hasTermsSales = !!c.termsAndConditionsOfSales;
     const hasWaterfall = c.waterfall || c.waterfallSummary;
     const hasFees = (c.fees?.length ?? 0) > 0 || (c.collateralManagerFees && Object.keys(c.collateralManagerFees).length > 0);
     const hasAccounts = (c.accounts?.length ?? 0) > 0;
+    const hasParties = (c.keyParties?.length ?? 0) > 0;
+    const hasCmDetails = c.cmDetails && Object.values(c.cmDetails).some((v) => v);
     const hasHedging = c.hedging && Object.values(c.hedging).some((v) => v != null);
     const hasRedemption = (c.redemptionProvisions?.length ?? 0) > 0;
     const hasDefaults = (c.eventsOfDefault?.length ?? 0) > 0;
     const hasVoting = c.votingAndControl && Object.values(c.votingAndControl).some((v) => v);
     const hasInterest = c.interestMechanics && Object.values(c.interestMechanics).some((v) => v != null);
+    const hasEsg = (c.esgExclusions?.length ?? 0) > 0;
+    const hasRiskRetention = c.riskRetention && (c.riskRetention.euUk || c.riskRetention.us);
+    const hasTax = c.tax && Object.values(c.tax).some((v) => v);
+    const hasTransfers = (c.transferRestrictions?.length ?? 0) > 0;
+    const hasReports = (c.reports?.length ?? 0) > 0;
+    const hasRatingParams = c.ratingAgencyParameters && Object.values(c.ratingAgencyParameters).some((v) => v);
+    const hasLegalProtections = (c.legalProtections?.length ?? 0) > 0;
+    const hasRatingThresholds = !!c.ratingThresholds;
+    const hasRefinancing = (c.refinancingHistory?.length ?? 0) > 0;
+    const hasAdditionalIssuance = !!c.additionalIssuance;
+    const hasRiskFactors = c.riskFactors && Object.keys(c.riskFactors).length > 0;
+    const hasConflicts = (c.conflictsOfInterest?.length ?? 0) > 0;
+    const hasOther = (c.otherConstraints?.length ?? 0) > 0;
+    const hasAdditional = !!c.additionalProvisions;
     const hasLoss = c.lossMitigationLimits && Object.keys(c.lossMitigationLimits).length > 0;
+    const hasReinvestment = !!c.reinvestmentCriteria;
+    const hasDealIdentity = c.dealIdentity && Object.values(c.dealIdentity).some((v) => v);
+    const hasKeyDates = c.keyDates && Object.values(c.keyDates).some((v) => v);
 
-    const sectionCount = [hasWaterfall, hasFees, hasAccounts, hasHedging, hasRedemption, hasDefaults, hasVoting, hasInterest, hasLoss].filter(Boolean).length;
-    if (sectionCount === 0) return null;
+    const anyContent = hasEligibility || hasManagement || hasTermsSales || hasWaterfall || hasFees || hasAccounts
+      || hasParties || hasCmDetails || hasHedging || hasRedemption || hasDefaults || hasVoting || hasInterest
+      || hasEsg || hasRiskRetention || hasTax || hasTransfers || hasReports || hasRatingParams || hasLegalProtections
+      || hasRatingThresholds || hasRefinancing || hasAdditionalIssuance || hasRiskFactors || hasConflicts
+      || hasOther || hasAdditional || hasLoss || hasReinvestment || hasDealIdentity || hasKeyDates;
+
+    if (!anyContent) return null;
 
     return (
-      <CollapsibleSection title="Structure & Mechanics" badge={`${sectionCount} sections`}>
-        {/* Waterfall */}
+      <CollapsibleSection title="Additional Document Context" defaultOpen={false}>
+        {hasEligibility && (
+          c.eligibilityCriteria && c.eligibilityCriteria.length > 0 ? (
+            <div className="ic-field">
+              <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>
+                Eligibility Criteria ({c.eligibilityCriteria.length} items)
+              </label>
+              <textarea className="ic-textarea" rows={6}
+                value={c.eligibilityCriteria.join("\n")}
+                onChange={(e) => {
+                  const items = e.target.value.split("\n").filter((l) => l.trim());
+                  updateConstraint("eligibilityCriteria", items);
+                }} />
+            </div>
+          ) : c.eligibleCollateral ? (
+            <div className="ic-field">
+              <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Eligible Collateral</label>
+              <textarea className="ic-textarea" rows={2}
+                value={c.eligibleCollateral || ""}
+                onChange={(e) => updateConstraint("eligibleCollateral", e.target.value)} />
+            </div>
+          ) : null
+        )}
+
+        {hasManagement && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Management of Portfolio</label>
+            <textarea className="ic-textarea" rows={4}
+              value={c.managementOfPortfolio || ""}
+              onChange={(e) => updateConstraint("managementOfPortfolio", e.target.value)} />
+          </div>
+        )}
+
+        {hasTermsSales && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Terms and Conditions of Sales</label>
+            <textarea className="ic-textarea" rows={4}
+              value={c.termsAndConditionsOfSales || ""}
+              onChange={(e) => updateConstraint("termsAndConditionsOfSales", e.target.value)} />
+          </div>
+        )}
+
         {c.waterfall ? (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Waterfall</label>
@@ -687,7 +799,6 @@ export default function QuestionnaireForm() {
           </div>
         ) : null}
 
-        {/* Fees */}
         {c.fees && c.fees.length > 0 ? (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Fees ({c.fees.length} items)</label>
@@ -728,48 +839,6 @@ export default function QuestionnaireForm() {
           </div>
         )}
 
-        {hasHedging && <KeyValueGrid data={c.hedging!} label="Hedging Provisions" />}
-
-        {hasRedemption && <TypeDescriptionList items={c.redemptionProvisions!} label="Redemption Provisions" />}
-
-        {hasDefaults && <TypeDescriptionList items={c.eventsOfDefault!} label="Events of Default" />}
-
-        {hasVoting && <KeyValueGrid data={c.votingAndControl!} label="Voting & Control" />}
-
-        {hasInterest && (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Interest Mechanics</label>
-            <div style={{ fontSize: "0.8rem" }}>
-              {c.interestMechanics!.dayCount && <div>Day Count: {c.interestMechanics!.dayCount}</div>}
-              {c.interestMechanics!.referenceRate && <div>Reference Rate: {c.interestMechanics!.referenceRate}</div>}
-              {c.interestMechanics!.deferralClasses?.length && <div>Deferral Classes: {c.interestMechanics!.deferralClasses.join(", ")}</div>}
-              {c.interestMechanics!.deferredInterestCompounds != null && <div>Deferred Interest Compounds: {c.interestMechanics!.deferredInterestCompounds ? "Yes" : "No"}</div>}
-            </div>
-          </div>
-        )}
-
-        {hasLoss && (
-          <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Loss Mitigation Limits</label>
-            <div style={{ fontSize: "0.8rem" }}>
-              {Object.entries(c.lossMitigationLimits!).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
-            </div>
-          </div>
-        )}
-      </CollapsibleSection>
-    );
-  }
-
-  function renderPartiesAndManagement() {
-    const hasParties = (c.keyParties?.length ?? 0) > 0;
-    const hasCmDetails = c.cmDetails && Object.values(c.cmDetails).some((v) => v);
-    const hasCmTrading = c.cmTradingConstraints && Object.values(c.cmTradingConstraints).some((v) => v != null);
-
-    const sectionCount = [hasParties, hasCmDetails, hasCmTrading].filter(Boolean).length;
-    if (sectionCount === 0) return null;
-
-    return (
-      <CollapsibleSection title="Parties & Management" badge={`${sectionCount} sections`}>
         {hasParties && (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Key Parties ({c.keyParties!.length})</label>
@@ -794,35 +863,26 @@ export default function QuestionnaireForm() {
 
         {hasCmDetails && <KeyValueGrid data={c.cmDetails!} label="CM Details" />}
 
-        {hasCmTrading && (
+        {hasHedging && <KeyValueGrid data={c.hedging!} label="Hedging Provisions" />}
+
+        {hasRedemption && <TypeDescriptionList items={c.redemptionProvisions!} label="Redemption Provisions" />}
+
+        {hasDefaults && <TypeDescriptionList items={c.eventsOfDefault!} label="Events of Default" />}
+
+        {hasVoting && <KeyValueGrid data={c.votingAndControl!} label="Voting & Control" />}
+
+        {hasInterest && (
           <div className="ic-field">
-            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>CM Trading Constraints</label>
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Interest Mechanics</label>
             <div style={{ fontSize: "0.8rem" }}>
-              {c.cmTradingConstraints!.discretionarySales && <div>Discretionary Sales: {c.cmTradingConstraints!.discretionarySales}</div>}
-              {c.cmTradingConstraints!.requiredSaleTypes?.length && <div>Required Sale Types: {c.cmTradingConstraints!.requiredSaleTypes.join(", ")}</div>}
-              {c.cmTradingConstraints!.postReinvestmentTrading && <div>Post-RP Trading: {c.cmTradingConstraints!.postReinvestmentTrading}</div>}
+              {c.interestMechanics!.dayCount && <div>Day Count: {c.interestMechanics!.dayCount}</div>}
+              {c.interestMechanics!.referenceRate && <div>Reference Rate: {c.interestMechanics!.referenceRate}</div>}
+              {c.interestMechanics!.deferralClasses?.length && <div>Deferral Classes: {c.interestMechanics!.deferralClasses.join(", ")}</div>}
+              {c.interestMechanics!.deferredInterestCompounds != null && <div>Deferred Interest Compounds: {c.interestMechanics!.deferredInterestCompounds ? "Yes" : "No"}</div>}
             </div>
           </div>
         )}
-      </CollapsibleSection>
-    );
-  }
 
-  function renderRegulatoryAndLegal() {
-    const hasRiskRetention = c.riskRetention && (c.riskRetention.euUk || c.riskRetention.us);
-    const hasTax = c.tax && Object.values(c.tax).some((v) => v);
-    const hasTransfers = (c.transferRestrictions?.length ?? 0) > 0;
-    const hasReports = (c.reports?.length ?? 0) > 0;
-    const hasRatingParams = c.ratingAgencyParameters && Object.values(c.ratingAgencyParameters).some((v) => v);
-    const hasLegalProtections = (c.legalProtections?.length ?? 0) > 0;
-    const hasEsg = (c.esgExclusions?.length ?? 0) > 0;
-    const hasRatingThresholds = !!c.ratingThresholds;
-
-    const sectionCount = [hasRiskRetention, hasTax, hasTransfers, hasReports, hasRatingParams, hasLegalProtections, hasEsg, hasRatingThresholds].filter(Boolean).length;
-    if (sectionCount === 0) return null;
-
-    return (
-      <CollapsibleSection title="Regulatory & Legal" badge={`${sectionCount} sections`}>
         {hasEsg && (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>
@@ -874,23 +934,7 @@ export default function QuestionnaireForm() {
               onChange={(e) => updateConstraint("ratingThresholds", e.target.value)} />
           </div>
         )}
-      </CollapsibleSection>
-    );
-  }
 
-  function renderHistoryAndOther() {
-    const hasRefinancing = (c.refinancingHistory?.length ?? 0) > 0;
-    const hasAdditionalIssuance = c.additionalIssuance;
-    const hasRiskFactors = c.riskFactors && Object.keys(c.riskFactors).length > 0;
-    const hasConflicts = (c.conflictsOfInterest?.length ?? 0) > 0;
-    const hasOther = (c.otherConstraints?.length ?? 0) > 0;
-    const hasAdditional = !!c.additionalProvisions;
-
-    const sectionCount = [hasRefinancing, hasAdditionalIssuance, hasRiskFactors, hasConflicts, hasOther, hasAdditional].filter(Boolean).length;
-    if (sectionCount === 0) return null;
-
-    return (
-      <CollapsibleSection title="History & Other" badge={`${sectionCount} sections`}>
         {hasRefinancing && (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Refinancing History ({c.refinancingHistory!.length})</label>
@@ -949,15 +993,26 @@ export default function QuestionnaireForm() {
         {hasAdditional && (
           <div className="ic-field">
             <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Additional Provisions</label>
-            <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
-              Everything else from the PPM — workout treatment, trading restrictions, interest deferral,
-              manager provisions, redemption mechanics, defined terms, etc.
-            </p>
             <textarea className="ic-textarea" rows={8}
               value={c.additionalProvisions || ""}
               onChange={(e) => updateConstraint("additionalProvisions", e.target.value)} />
           </div>
         )}
+
+        {hasLoss && (
+          <div className="ic-field">
+            <label className="ic-field-label" style={{ fontSize: "0.85rem" }}>Loss Mitigation Limits</label>
+            <div style={{ fontSize: "0.8rem" }}>
+              {Object.entries(c.lossMitigationLimits!).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
+            </div>
+          </div>
+        )}
+
+        {hasReinvestment && <KeyValueGrid data={c.reinvestmentCriteria!} label="Reinvestment Criteria" />}
+
+        {hasDealIdentity && <KeyValueGrid data={c.dealIdentity!} label="Deal Identity" />}
+
+        {hasKeyDates && <KeyValueGrid data={c.keyDates!} label="Key Dates" />}
       </CollapsibleSection>
     );
   }
@@ -1042,19 +1097,17 @@ export default function QuestionnaireForm() {
 
         {step === 1 && (
           <div className="ic-field">
-            <label className="ic-field-label">
-              Review Extracted Constraints
-            </label>
+            <label className="ic-field-label">Review Extracted Constraints</label>
             <p style={{ fontSize: "0.85rem", color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
               These constraints were extracted from your documents. Edit any values the AI got wrong.
             </p>
+            {renderHeader()}
             <div style={{ display: "grid", gap: "0.5rem" }}>
-              {renderDealOverview()}
-              {renderTestsAndConstraints()}
-              {renderStructureAndMechanics()}
-              {renderPartiesAndManagement()}
-              {renderRegulatoryAndLegal()}
-              {renderHistoryAndOther()}
+              {renderCapitalStructure()}
+              {renderComplianceTests()}
+              {renderProfileTests()}
+              {renderTradingConstraints()}
+              {renderAdditionalContext()}
             </div>
           </div>
         )}
