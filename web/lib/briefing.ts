@@ -1,5 +1,48 @@
 import { query } from "@/lib/db";
 
+export async function fetchAndStoreBriefings(): Promise<{ fetched: string[]; skipped: string[]; errors: string[] }> {
+  const briefApiKey = process.env.BRIEF_API_KEY;
+  if (!briefApiKey) {
+    return { fetched: [], skipped: [], errors: ["BRIEF_API_KEY not configured"] };
+  }
+
+  const fetched: string[] = [];
+  const skipped: string[] = [];
+  const errors: string[] = [];
+
+  for (const briefType of ["general", "clo"] as const) {
+    const existing = await query<{ id: string }>(
+      "SELECT id FROM daily_briefings WHERE brief_type = $1 AND fetched_at > now() - interval '1 hour' LIMIT 1",
+      [briefType]
+    );
+    if (existing.length > 0) {
+      skipped.push(briefType);
+      continue;
+    }
+
+    const res = await fetch(`http://89.167.78.232:3000/briefing/${briefType}?id=-1`, {
+      headers: { Authorization: `Bearer ${briefApiKey}` },
+    });
+    if (!res.ok) {
+      errors.push(`${briefType}: HTTP ${res.status}`);
+      continue;
+    }
+    const content = await res.text();
+    if (!content.trim()) {
+      errors.push(`${briefType}: empty response`);
+      continue;
+    }
+
+    await query(
+      "INSERT INTO daily_briefings (brief_type, content) VALUES ($1, $2)",
+      [briefType, content]
+    );
+    fetched.push(briefType);
+  }
+
+  return { fetched, skipped, errors };
+}
+
 export async function getLatestBriefing(
   briefType = "general"
 ): Promise<string | null> {

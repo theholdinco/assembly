@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-helpers";
 import { query } from "@/lib/db";
 import { decryptApiKey } from "@/lib/crypto";
-import { getUserBriefingDigest } from "@/lib/briefing";
+import { getUserBriefingDigest, fetchAndStoreBriefings } from "@/lib/briefing";
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -57,5 +57,33 @@ export async function GET() {
   } catch (err) {
     console.error("[clo/briefing] Error generating briefing:", err);
     return NextResponse.json(null);
+  }
+}
+
+export async function POST() {
+  const user = await getCurrentUser();
+  if (!user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    // Fetch fresh briefings from external API
+    const result = await fetchAndStoreBriefings();
+
+    // Clear cached digests for this user so the next GET regenerates
+    if (result.fetched.length > 0) {
+      await query(
+        "DELETE FROM user_briefing_digests WHERE user_id = $1 AND product = 'clo'",
+        [user.id]
+      );
+    }
+
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("[clo/briefing] Error fetching briefings:", err);
+    return NextResponse.json(
+      { error: "Failed to fetch briefings" },
+      { status: 500 }
+    );
   }
 }
