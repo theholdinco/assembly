@@ -79,13 +79,14 @@ function cushionColor(cushion: number): string {
 }
 
 function TestComplianceSection({ tests, newTests }: { tests?: ComplianceTest[]; newTests?: CloComplianceTest[] }) {
-  // Prefer new data
-  if (newTests && newTests.length > 0) {
+  // Prefer new data — filter out empty/zero-value tests from partial extractions
+  const validTests = newTests?.filter((t) => (t.actualValue != null && t.actualValue !== 0) || (t.triggerLevel != null && t.triggerLevel !== 0));
+  if (validTests && validTests.length > 0) {
     return (
       <section className="ic-section">
         <h2>Test Compliance</h2>
         <div style={{ display: "grid", gap: "0.75rem" }}>
-          {newTests.map((t) => {
+          {validTests.map((t) => {
             const actual = t.actualValue ?? 0;
             const trigger = t.triggerLevel ?? 0;
             const cushion = t.cushionPct ?? (actual - trigger);
@@ -397,13 +398,14 @@ function LegacyConcentrationsSection({ concentrations }: { concentrations: Extra
 }
 
 function AccountBalancesSection({ balances }: { balances: CloAccountBalance[] }) {
-  if (!balances || balances.length === 0) return null;
+  const withData = balances?.filter((b) => b.balanceAmount != null);
+  if (!withData || withData.length === 0) return null;
 
   return (
     <section className="ic-section">
       <h2>Account Balances</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.75rem" }}>
-        {balances.map((b) => (
+        {withData.map((b) => (
           <div
             key={b.id}
             style={{
@@ -532,14 +534,19 @@ function completenessScore(entry: CapitalStructureEntry): number {
   return score;
 }
 
+function normalizeClassKey(name: string): string {
+  return name.replace(/^class\s+/i, "").replace(/-?RR$/i, "").replace(/\s+notes?$/i, "").trim().toUpperCase();
+}
+
 function CapitalStructureSection({ capitalStructure }: { capitalStructure: CapitalStructureEntry[] }) {
   if (!capitalStructure || capitalStructure.length === 0) return null;
 
   const bestByClass = new Map<string, CapitalStructureEntry>();
   for (const entry of capitalStructure) {
-    const existing = bestByClass.get(entry.class);
+    const key = normalizeClassKey(entry.class);
+    const existing = bestByClass.get(key);
     if (!existing || completenessScore(entry) > completenessScore(existing)) {
-      bestByClass.set(entry.class, entry);
+      bestByClass.set(key, entry);
     }
   }
   const deduplicated = Array.from(bestByClass.values());
