@@ -521,8 +521,28 @@ function HoldingsPreview({ holdings }: { holdings: ExtractedPortfolio["holdings"
   );
 }
 
+function completenessScore(entry: CapitalStructureEntry): number {
+  let score = 0;
+  if (entry.principalAmount && !/not specified/i.test(entry.principalAmount)) score += 3;
+  if (entry.rating?.fitch) score += 2;
+  if (entry.rating?.sp) score += 2;
+  if (entry.spread && entry.spread !== "—") score += 1;
+  if (entry.deferrable != null) score += 1;
+  return score;
+}
+
 function CapitalStructureSection({ capitalStructure }: { capitalStructure: CapitalStructureEntry[] }) {
   if (!capitalStructure || capitalStructure.length === 0) return null;
+
+  const bestByClass = new Map<string, CapitalStructureEntry>();
+  for (const entry of capitalStructure) {
+    const existing = bestByClass.get(entry.class);
+    if (!existing || completenessScore(entry) > completenessScore(existing)) {
+      bestByClass.set(entry.class, entry);
+    }
+  }
+  const deduplicated = Array.from(bestByClass.values());
+
   return (
     <section className="ic-section">
       <h2>Capital Structure</h2>
@@ -538,7 +558,7 @@ function CapitalStructureSection({ capitalStructure }: { capitalStructure: Capit
             </tr>
           </thead>
           <tbody>
-            {capitalStructure.map((entry) => (
+            {deduplicated.map((entry) => (
               <tr key={entry.class} style={{ borderBottom: "1px solid var(--color-border)" }}>
                 <td style={{ padding: "0.4rem 0.6rem", fontWeight: 600 }}>{entry.class}</td>
                 <td style={{ padding: "0.4rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{entry.principalAmount}</td>
