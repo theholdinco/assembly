@@ -20,7 +20,7 @@ export default async function CLOLayout({
       <aside className="ic-sidebar">
         <div className="ic-sidebar-header">
           <Link href="/" className="ic-sidebar-logo">
-            Million Minds
+            <img src="/logo/black-text.png" alt="Million Minds" className="sidebar-logo-img" />
           </Link>
           <span className="ic-sidebar-badge">CLO</span>
         </div>
@@ -44,6 +44,10 @@ export default async function CLOLayout({
                 <span className="ic-nav-icon">&#9670;</span>
                 Screenings
               </Link>
+              <Link href="/clo/context" className="ic-nav-link">
+                <span className="ic-nav-icon">&#9670;</span>
+                Context
+              </Link>
             </>
           )}
         </nav>
@@ -55,7 +59,30 @@ export default async function CLOLayout({
         </div>
       </aside>
 
-      <main className="ic-main">{children}</main>
+      <main className="ic-main">
+        {children}
+        {profile && (
+          <Link
+            href="/clo/context"
+            style={{
+              position: "fixed",
+              bottom: "1.5rem",
+              left: "1.5rem",
+              padding: "0.4rem 0.8rem",
+              fontSize: "0.75rem",
+              color: "var(--color-text-muted)",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "var(--radius-sm)",
+              opacity: 0.7,
+              textDecoration: "none",
+              zIndex: 50,
+            }}
+          >
+            Edit Context
+          </Link>
+        )}
+      </main>
     </div>
   );
 }
