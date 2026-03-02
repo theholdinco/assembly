@@ -159,6 +159,16 @@ export async function verifyScreeningAccess(screeningId: string, userId: string)
   return rows.length > 0;
 }
 
+export async function verifyPanelAccess(panelId: string, userId: string) {
+  const rows = await query<{ id: string }>(
+    `SELECT p.id FROM clo_panels p
+     JOIN clo_profiles pr ON p.profile_id = pr.id
+     WHERE p.id = $1 AND pr.user_id = $2`,
+    [panelId, userId]
+  );
+  return rows.length > 0;
+}
+
 // ─── Row Converters ─────────────────────────────────────────────────
 
 function rowToDeal(row: Record<string, unknown>): CloDeal {
