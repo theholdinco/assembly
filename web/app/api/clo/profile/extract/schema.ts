@@ -202,6 +202,15 @@ export const extractedConstraintsSchema = z.object({
     postReinvestmentTrading: z.string().optional(),
   }).passthrough().optional(),
 
+  managementOfPortfolio: z.string().optional(),
+
+  termsAndConditionsOfSales: z.string().optional(),
+
+  tradingRestrictionsByTestBreach: z.array(z.object({
+    testName: z.string(),
+    consequence: z.string(),
+  })).optional(),
+
   refinancingHistory: z.array(z.object({
     date: z.string().optional(),
     details: z.string().optional(),
