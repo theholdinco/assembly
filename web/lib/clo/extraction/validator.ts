@@ -1,4 +1,5 @@
-import type { Pass1Output, Pass2Output, Pass3Output } from "./schemas";
+import type { Pass1Output, Pass2Output, Pass3Output, Pass4Output } from "./schemas";
+import type { CapitalStructureEntry } from "../types";
 
 export interface ValidationCheck {
   name: string;
@@ -274,4 +275,142 @@ export function validateExtraction(
     checksRun: checks.length,
     checksSkipped: skipped,
   };
+}
+
+// ─── Cap Structure Cross-Validation (PPM vs Compliance Report) ───
+
+/** Normalize class name for matching: "Class A-1" → "A1", "Sub Notes" → "SUBNOTES" */
+function normalizeCapClassName(name: string): string {
+  return name
+    .replace(/^class(es)?\s+/i, "")
+    .replace(/[\s\-\/]+/g, "")
+    .toUpperCase();
+}
+
+/** Parse a principal amount string like "€150,000,000" or "150000000" to a number */
+function parsePrincipalAmount(amount: string): number | null {
+  const cleaned = amount.replace(/[^0-9.]/g, "");
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
+
+export function validateCapStructure(
+  ppmCapStructure: CapitalStructureEntry[] | undefined,
+  trancheSnapshots: Pass4Output["trancheSnapshots"] | undefined,
+): ValidationCheck[] {
+  if (!ppmCapStructure || ppmCapStructure.length === 0 || !trancheSnapshots || trancheSnapshots.length === 0) {
+    return [];
+  }
+
+  const checks: ValidationCheck[] = [];
+
+  // Build lookup maps by normalized class name
+  const ppmByClass = new Map<string, CapitalStructureEntry>();
+  for (const entry of ppmCapStructure) {
+    ppmByClass.set(normalizeCapClassName(entry.class), entry);
+  }
+
+  const reportByClass = new Map<string, Pass4Output["trancheSnapshots"][number]>();
+  for (const snap of trancheSnapshots) {
+    reportByClass.set(normalizeCapClassName(snap.className), snap);
+  }
+
+  // 1. Check tranche count mismatch
+  // Filter out equity/sub notes from PPM count since compliance reports sometimes omit them
+  const ppmRatedTranches = ppmCapStructure.filter((e) => {
+    const norm = normalizeCapClassName(e.class);
+    return !norm.includes("SUB") && !norm.includes("EQUITY") && !norm.includes("INCOME");
+  });
+  const reportTranches = trancheSnapshots.filter((s) => {
+    const norm = normalizeCapClassName(s.className);
+    return !norm.includes("SUB") && !norm.includes("EQUITY") && !norm.includes("INCOME");
+  });
+
+  if (ppmRatedTranches.length !== reportTranches.length) {
+    checks.push({
+      name: "cap_structure_tranche_count",
+      status: "warn",
+      expected: ppmRatedTranches.length,
+      actual: reportTranches.length,
+      discrepancy: Math.abs(ppmRatedTranches.length - reportTranches.length),
+      message: `Cap structure mismatch: PPM has ${ppmRatedTranches.length} rated tranches but compliance report has ${reportTranches.length}. This may indicate a tranche reset or restructuring — verify which is current.`,
+    });
+  }
+
+  // 2. Check for tranches in report but not in PPM (new tranches after reset)
+  const reportOnlyClasses: string[] = [];
+  for (const [normName, snap] of reportByClass) {
+    if (!ppmByClass.has(normName)) {
+      reportOnlyClasses.push(snap.className);
+    }
+  }
+  if (reportOnlyClasses.length > 0) {
+    checks.push({
+      name: "cap_structure_new_tranches",
+      status: "warn",
+      expected: 0,
+      actual: reportOnlyClasses.length,
+      discrepancy: reportOnlyClasses.length,
+      message: `Compliance report contains tranches not found in PPM: ${reportOnlyClasses.join(", ")}. The PPM may be outdated (e.g., post-reset/refinancing). The compliance report likely reflects the current structure.`,
+    });
+  }
+
+  // 3. Check for tranches in PPM but not in report (retired tranches)
+  const ppmOnlyClasses: string[] = [];
+  for (const [normName, entry] of ppmByClass) {
+    if (!reportByClass.has(normName)) {
+      ppmOnlyClasses.push(entry.class);
+    }
+  }
+  if (ppmOnlyClasses.length > 0) {
+    checks.push({
+      name: "cap_structure_missing_tranches",
+      status: "warn",
+      expected: ppmOnlyClasses.length,
+      actual: 0,
+      discrepancy: ppmOnlyClasses.length,
+      message: `PPM tranches not found in compliance report: ${ppmOnlyClasses.join(", ")}. These may have been retired, paid down, or renamed in a reset.`,
+    });
+  }
+
+  // 4. For matched tranches, compare principal amounts
+  for (const [normName, ppmEntry] of ppmByClass) {
+    const reportSnap = reportByClass.get(normName);
+    if (!reportSnap) continue;
+
+    const ppmAmount = parsePrincipalAmount(ppmEntry.principalAmount);
+    const reportBalance = reportSnap.currentBalance ?? reportSnap.beginningBalance;
+
+    if (ppmAmount != null && reportBalance != null && ppmAmount > 0) {
+      const diff = Math.abs(reportBalance - ppmAmount);
+      const pctDiff = (diff / ppmAmount) * 100;
+
+      // Only flag if balance is higher than PPM (indicates reset upward) or significantly different
+      if (pctDiff > 5) {
+        const isHigher = reportBalance > ppmAmount;
+        checks.push({
+          name: `cap_structure_balance_${normName}`,
+          status: "warn",
+          expected: ppmAmount,
+          actual: reportBalance,
+          discrepancy: Math.round(pctDiff * 100) / 100,
+          message: `${ppmEntry.class}: compliance report balance (${reportBalance.toLocaleString()}) is ${isHigher ? "higher" : "lower"} than PPM original amount (${ppmAmount.toLocaleString()}) by ${pctDiff.toFixed(1)}%.${isHigher ? " This likely indicates a tranche reset — compliance report reflects current structure." : " Normal amortization or paydown."}`,
+        });
+      }
+    }
+  }
+
+  // 5. If ANY mismatch was found, add an overall advisory
+  if (checks.length > 0) {
+    checks.unshift({
+      name: "cap_structure_mismatch_advisory",
+      status: "warn",
+      expected: null,
+      actual: null,
+      discrepancy: null,
+      message: `PPM and compliance report capital structures differ. When documents disagree, the compliance report typically reflects the most recent state (post-reset, refinancing, or amendment). Verify against the latest supplemental indenture or trustee notice.`,
+    });
+  }
+
+  return checks;
 }

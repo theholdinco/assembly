@@ -8,7 +8,28 @@ const QUALITY_RULES = `
 - Speak plainly: if stripping jargon makes the idea disappear, there was no idea.
 - Each member stays in character with their established philosophy and risk personality.
 - WEB SEARCH: You have web search available. Use it to verify claims, check recent news about borrowers or sectors, find current market data, and confirm financial details. Always cite your sources when referencing search results.
-- SLOP BAN — the following phrases are BANNED. If you catch yourself writing any, delete and rewrite: "in today's rapidly evolving landscape", "it's important to note", "furthermore/moreover/additionally" as transitions, "nuanced" as a substitute for a position, "multifaceted/holistic/synergy/stakeholders", "it bears mentioning", "at the end of the day", "navigate" (as metaphor), "leverage" (as verb meaning "use"), "robust/comprehensive/cutting-edge", any sentence that could appear in any document about any topic.`;
+- SLOP BAN — the following phrases are BANNED. If you catch yourself writing any, delete and rewrite: "in today's rapidly evolving landscape", "it's important to note", "furthermore/moreover/additionally" as transitions, "nuanced" as a substitute for a position, "multifaceted/holistic/synergy/stakeholders", "it bears mentioning", "at the end of the day", "navigate" (as metaphor), "leverage" (as verb meaning "use"), "robust/comprehensive/cutting-edge", any sentence that could appear in any document about any topic.
+
+## CLO Mechanics (MUST get these right — factual errors here destroy credibility)
+### Arbitrage
+- The CLO equity arbitrage = asset spread (loan WAS) minus liability cost (weighted average cost of CLO tranches).
+- Tight CLO liabilities (low AAA/AA/A spreads) HELP the arbitrage — they reduce funding costs. Do NOT describe tight liabilities as compressing the arb or as a negative for CLO equity.
+- What compresses the arb from the LIABILITY side is WIDENING liabilities (higher tranche spreads), not tightening.
+- What compresses the arb from the ASSET side is lower loan spreads (declining WAS).
+- Example: if loan WAS declines but AAA liabilities also tighten, the arb may be stable or only compressed from one side (assets). Saying "compressed from both sides" in this scenario is factually wrong.
+### Equity Distributions
+- CLO equity distributions can decline for many reasons — distinguish between them: (1) arb compression from lower asset spreads, (2) credit losses / defaults reducing par, (3) OC test failures diverting cash from equity to senior tranches, (4) lower reinvestment spreads when loans repay and are replaced at tighter levels, (5) interest rate mismatches if floating rate assets reset differently than liabilities.
+- A cut in equity distributions does NOT automatically mean "the arb is collapsing" — diagnose the actual cause.
+### Waterfall & Subordination
+- CLO tranches are paid in strict priority: AAA first, then AA, A, BBB, BB, then equity gets the residual.
+- OC (overcollateralization) tests protect senior tranches: if par value drops below the OC trigger, cash is diverted from equity to pay down senior notes until the test is cured.
+- IC (interest coverage) tests ensure there is enough interest income to cover coupon payments to each tranche level.
+- Subordinated tranche holders (equity, BB) absorb losses first — this is the intended design, not a sign of "dysfunction." Equity is supposed to be the first-loss piece.
+### Market Dynamics
+- New-issue CLO spreads (primary) vs secondary CLO spreads can diverge — do not conflate them.
+- CLO formation arbitrage (for new deals) depends on primary loan spreads vs new-issue liability costs at the time of pricing.
+- Existing CLO equity performance depends on the portfolio's CURRENT weighted average spread vs the LOCKED-IN liability costs from the deal's original pricing (plus any refinancing/reset).
+- A CLO that locked in tight liabilities during favorable conditions has a structural advantage even if current new-issue liability spreads widen.`;
 
 function formatConstraints(constraints: CloProfile["extractedConstraints"], mode: "compact" | "full" = "full"): string {
   if (!constraints || Object.keys(constraints).length === 0) return "";

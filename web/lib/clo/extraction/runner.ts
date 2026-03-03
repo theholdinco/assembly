@@ -4,7 +4,7 @@ import { callAnthropicChunkedWithTool, normalizeClassName } from "../api";
 import { pass1Schema, pass2Schema, pass3Schema, pass4Schema, pass5Schema } from "./schemas";
 import { pass1Prompt, pass2Prompt, pass3Prompt, pass4Prompt, pass5Prompt, pass2RepairPrompt, passContinuationPrompt } from "./prompts";
 import { normalizePass1, normalizePass2, normalizePass3, normalizePass4, normalizePass5 } from "./normalizer";
-import { validateExtraction } from "./validator";
+import { validateExtraction, validateCapStructure } from "./validator";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 // zodToJsonSchema v3 doesn't support zod v4 — produces empty schemas.
@@ -470,7 +470,23 @@ export async function runExtraction(
   // Run cross-validation
   const pass2Data = p2?.data as unknown as import("./schemas").Pass2Output | null;
   const pass3Data = p3?.data as unknown as import("./schemas").Pass3Output | null;
+  const pass4Data = p4?.data as unknown as import("./schemas").Pass4Output | null;
   let validationResult = validateExtraction(pass1Data, pass2Data ?? null, pass3Data ?? null);
+
+  // Cross-validate cap structure: PPM vs compliance report tranches
+  const ppmConstraints = await query<{ extracted_constraints: Record<string, unknown> }>(
+    "SELECT extracted_constraints FROM clo_profiles WHERE id = $1",
+    [profileId],
+  );
+  const ppmCapStructure = (ppmConstraints[0]?.extracted_constraints?.capitalStructure ?? []) as import("../types").CapitalStructureEntry[];
+  const capStructureChecks = validateCapStructure(ppmCapStructure, pass4Data?.trancheSnapshots);
+  if (capStructureChecks.length > 0) {
+    validationResult.checks.push(...capStructureChecks);
+    validationResult.totalChecks += capStructureChecks.length;
+    validationResult.checksRun += capStructureChecks.length;
+    // Recount passed checks
+    validationResult.score = validationResult.checks.filter((c) => c.status === "pass").length;
+  }
 
   // ─── Repair Loop: re-extract passes with validation failures or truncation ───
   const repairNeeds = detectRepairNeeds(pass1Data, passResults);
@@ -567,6 +583,16 @@ export async function runExtraction(
     const repairedPass2Data = repairedP2?.data as unknown as import("./schemas").Pass2Output | null;
     const repairedPass3Data = (passResults.find((p) => p.pass === 3)?.data as unknown as import("./schemas").Pass3Output) ?? null;
     validationResult = validateExtraction(pass1Data, repairedPass2Data ?? null, repairedPass3Data);
+
+    // Re-apply cap structure checks after repair
+    const repairedP4Data = (passResults.find((p) => p.pass === 4)?.data as unknown as import("./schemas").Pass4Output) ?? null;
+    const repairedCapChecks = validateCapStructure(ppmCapStructure, repairedP4Data?.trancheSnapshots);
+    if (repairedCapChecks.length > 0) {
+      validationResult.checks.push(...repairedCapChecks);
+      validationResult.totalChecks += repairedCapChecks.length;
+      validationResult.checksRun += repairedCapChecks.length;
+      validationResult.score = validationResult.checks.filter((c) => c.status === "pass").length;
+    }
   }
 
   // Determine final status (after any repairs)

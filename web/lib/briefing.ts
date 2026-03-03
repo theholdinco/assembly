@@ -98,7 +98,13 @@ export async function getUserBriefingDigest(
       messages: [
         {
           role: "user",
-          content: `You are a market intelligence filter. Given a daily briefing and a user's profile, determine which items are relevant to this specific portfolio/profile.
+          content: `You are a market intelligence filter for CLO portfolio managers. Given a daily briefing and a user's profile, determine which items are relevant to this specific portfolio/profile.
+
+CRITICAL CLO KNOWLEDGE (apply when summarizing CLO market items):
+- The CLO equity arb = asset spread (loan WAS) minus liability cost (tranche spreads). Tight liabilities (low AAA spreads) HELP the arb by reducing funding costs — do NOT describe tight liabilities as negative.
+- Widening liabilities hurt the arb; declining loan WAS hurts the arb. Only describe "compressed from both sides" when BOTH asset spreads fall AND liability spreads widen.
+- Equity distribution cuts can stem from credit losses, OC test diversions, lower reinvestment spreads, or arb compression — distinguish the actual cause.
+- Existing CLO equity benefits from locked-in liability costs from original pricing — current new-issue spreads are irrelevant to existing deal economics.
 
 BRIEFING:
 ${combinedContent}
@@ -109,7 +115,8 @@ ${profileContext}
 Respond with JSON only: { "relevant": boolean, "digest": "markdown string or null" }
 - If nothing in the briefing is relevant to this specific user's portfolio/profile, set relevant=false and digest=null.
 - If there are relevant items, set relevant=true and write a concise digest (3-8 bullet points) highlighting ONLY the items that matter to this user and why.
-- Be specific about why each item matters to their particular holdings, sectors, or strategy.`,
+- Be specific about why each item matters to their particular holdings, sectors, or strategy.
+- If the source briefing contains factually incorrect CLO analysis (e.g., claiming tight liabilities hurt the arb), correct it in your digest.`,
         },
       ],
     }),

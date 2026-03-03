@@ -72,9 +72,12 @@ function CLOHealthSummary({ constraints }: { constraints: Record<string, unknown
   );
 }
 
-function cushionColor(cushion: number): string {
-  if (cushion >= 5) return "var(--color-success, #22c55e)";
-  if (cushion >= 2) return "var(--color-warning, #eab308)";
+function cushionColor(cushion: number, trigger?: number | null): string {
+  const relativeCushion = trigger != null && trigger !== 0
+    ? (Math.abs(cushion) / Math.abs(trigger)) * 100
+    : Math.abs(cushion);
+  if (relativeCushion >= 5) return "var(--color-success, #22c55e)";
+  if (relativeCushion >= 2) return "var(--color-warning, #eab308)";
   return "var(--color-error, #ef4444)";
 }
 
@@ -103,7 +106,7 @@ function testBarColor(t: CloComplianceTest, cushion: number): string {
     return "var(--color-warning, #eab308)";
   }
   if (t.isPassing === false) return "var(--color-error, #ef4444)";
-  return cushionColor(cushion);
+  return cushionColor(cushion, t.triggerLevel);
 }
 
 function TestComplianceSection({ tests, newTests }: { tests?: ComplianceTest[]; newTests?: CloComplianceTest[] }) {
@@ -164,7 +167,7 @@ function TestComplianceSection({ tests, newTests }: { tests?: ComplianceTest[]; 
           const maxVal = Math.max(t.actual, t.trigger) * 1.1;
           const actualPct = (t.actual / maxVal) * 100;
           const triggerPct = (t.trigger / maxVal) * 100;
-          const color = cushionColor(t.cushion);
+          const color = cushionColor(t.cushion, t.trigger);
           return (
             <div key={t.name}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: "0.25rem" }}>
@@ -350,7 +353,7 @@ function NewConcentrationsSection({ concentrations }: { concentrations: CloConce
                     width: `${Math.min(item.actualPct ?? 0, 100)}%`,
                     background: item.isPassing === false
                       ? "var(--color-error, #ef4444)"
-                      : "var(--color-accent)",
+                      : "var(--color-success, #22c55e)",
                     borderRadius: "3px",
                   }} />
                   {item.limitPct != null && (
@@ -619,42 +622,31 @@ function CapitalStructureSection({ capitalStructure }: { capitalStructure: Capit
 
 function NewHoldingsPreview({ holdings }: { holdings: CloHolding[] }) {
   if (!holdings || holdings.length === 0) return null;
-  const top20 = [...holdings].sort((a, b) => (b.parBalance ?? 0) - (a.parBalance ?? 0)).slice(0, 20);
+  const totalPar = holdings.reduce((sum, h) => sum + (h.parBalance ?? 0), 0);
+  const top10 = [...holdings].sort((a, b) => (b.parBalance ?? 0) - (a.parBalance ?? 0)).slice(0, 10);
   return (
     <section className="ic-section">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-        <h2 style={{ margin: 0 }}>Top Holdings ({holdings.length} total)</h2>
+        <h2 style={{ margin: 0 }}>Top 10 Obligors ({holdings.length} total)</h2>
         <Link href="/clo/holdings" className="ic-section-link" style={{ marginTop: 0 }}>
           View all &rarr;
         </Link>
       </div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--color-border)", textAlign: "left" }}>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)" }}>Obligor</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "right" }}>Par Balance</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)" }}>Rating</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "right" }}>Spread</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)" }}>Industry</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)" }}>Maturity</th>
-              <th style={{ padding: "0.4rem 0.6rem", fontWeight: 600, color: "var(--color-text-muted)" }}>Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {top20.map((h) => (
-              <tr key={h.id} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                <td style={{ padding: "0.4rem 0.6rem" }}>{h.obligorName ?? "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{h.parBalance != null ? h.parBalance.toLocaleString() : "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem" }}>{[h.moodysRating, h.spRating].filter(Boolean).join("/") || "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{h.spreadBps != null ? `${h.spreadBps} bps` : "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem" }}>{h.industryDescription ?? "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem" }}>{h.maturityDate ?? "—"}</td>
-                <td style={{ padding: "0.4rem 0.6rem" }}>{h.assetType ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div>
+        {top10.map((h) => {
+          const pct = totalPar > 0 && h.parBalance != null ? (h.parBalance / totalPar) * 100 : 0;
+          return (
+            <div key={h.id} style={{ marginBottom: "0.4rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: "0.15rem" }}>
+                <span>{h.obligorName ?? "—"}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 500 }}>{pct.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: "0.4rem", background: "var(--color-border)", borderRadius: "3px", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.min(pct * 5, 100)}%`, background: "var(--color-accent)", borderRadius: "3px" }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
