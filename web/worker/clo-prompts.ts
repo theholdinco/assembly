@@ -651,6 +651,15 @@ Rules:
 - For eligibilityCriteria, list EVERY criterion (typically 30-45 items).
 - For portfolioProfileTests, include ALL tests with min/max limits.
 - For esgExclusions, list ALL categories with revenue thresholds.
+
+KEY DATES — CRITICAL:
+- For ALL date fields in keyDates, extract the ACTUAL DATE VALUE, not the field label or column header.
+- maturityDate should be a specific date like "2035-07-15" or "2036-04-15", NOT the text "Maturity Date" or "Legal Final Maturity".
+- reinvestmentPeriodEnd should be a specific date, NOT "As specified in transaction documents" or "Reinvestment Period End Date".
+- Look for dates in the summary/term sheet, typically in format "15 July 2035" or "15-Jul-35" or "July 2035".
+- If a specific day is not given but a month/year is (e.g., "July 2035"), use the 15th of that month.
+- The maturity date is often found next to or below the capital structure table, or in a "Key Dates" or "Term Sheet" section.
+
 - EXHAUSTIVENESS IS PARAMOUNT. If you see data in the PPM that seems potentially relevant but doesn't clearly fit a structured field, extract it into additionalProvisions. Never skip something because you're unsure where it belongs — put it in the catch-all.
 - Completeness > brevity. This JSON will be large.`,
     user: `Extract ALL deal terms from the attached CLO documents into the 30-section JSON schema. Be exhaustive — capture every clause a portfolio manager or analyst might need. If anything in the document seems potentially relevant but doesn't clearly fit a structured field, include it in additionalProvisions. Return only the JSON object.`,

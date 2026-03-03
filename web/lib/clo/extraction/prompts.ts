@@ -1,6 +1,6 @@
 export function pass1Prompt(): { system: string; user: string } {
   return {
-    system: `You are a CLO compliance report analyst. Extract report metadata, pool-level summary, ALL compliance tests, account balances, and par value adjustments into the exact JSON schema below. Token budget hint: 8192.
+    system: `You are a CLO compliance report analyst. Extract report metadata, pool-level summary, ALL compliance tests, account balances, and par value adjustments into the exact JSON schema below. Token budget hint: 65536.
 
 Return a single JSON object (no markdown fences, no explanation) with this structure:
 
@@ -109,11 +109,29 @@ Return a single JSON object (no markdown fences, no explanation) with this struc
 
 Rules:
 - Extract ONLY explicitly stated values. Use null for missing fields. Never fabricate data.
-- Extract ALL coverage tests: OC par, OC market value, and IC at EVERY tranche level (A, A/B, C, D, E, F, etc.).
-- Extract ALL quality tests: WARF, WAS, WAL, diversity score, recovery rate tests, CDO Monitor tests, spread tests, recovery rate tests.
-- CRITICAL: For EVERY compliance test, you MUST extract both actualValue AND triggerLevel. Every test in a CLO report has a trigger/threshold/limit — look for columns like "Trigger", "Limit", "Threshold", "Required", "Min", "Max", "Test Level". If a test shows "Actual: 71.1, Required: 62.5", then actualValue=71.1 and triggerLevel=62.5.
-- For tests like WARF, the trigger may be labeled "Maximum" (e.g. "Maximum WARF: 2850"). For WAS/spread tests, the trigger may be "Minimum" (e.g. "Minimum WAS: 3.90%"). For WAL, it may be "Maximum WAL: 5.0 years". Always capture these as triggerLevel.
-- Extract concentration test result summaries if they appear alongside compliance tests.
+
+REPORT DATE — CRITICAL:
+- The report date is NOT a section header. Look for "Report Date:", "Determination Date:", "As of:", "Payment Date:", or a date prominently displayed near the top of the report (often in format "DD Month YYYY" or "DD-Mon-YYYY"). Convert to YYYY-MM-DD.
+- Also look for "Payment Date" — this is usually the report date in CLO trustee reports.
+- If you see "Report for the period ending..." or "As at...", extract that date.
+- NEVER return "UNKNOWN" or a placeholder — if no date is found, use null.
+
+POOL SUMMARY — CRITICAL:
+- Pool data often appears in a "Collateral Summary", "Pool Summary", "Portfolio Summary", or "Report Summary" section.
+- Look for total par/principal in rows like "Total Par Amount", "Aggregate Principal Balance", "Total Collateral Balance".
+- WAC spread may appear as "Weighted Average Spread", "WA Spread", or "WAS".
+- These values are ESSENTIAL for the waterfall model. Search thoroughly.
+
+COMPLIANCE TESTS — DEDUPLICATION:
+- The SAME test often appears in MULTIPLE sections of the report (e.g., "Coverage Tests Summary", "Detailed OC/IC Tests", "Test Results", and within the waterfall narrative). Extract each unique test ONLY ONCE.
+- Use the entry with the MOST complete data (has actualValue, triggerLevel, and isPassing).
+- Normalize class names: "A/B", "Class A/B", and "Classes A and B" all refer to the same class — use "A/B".
+- Do NOT extract table headers, column labels, or test descriptions as test entries. An entry like "Class E Par Value Test" with no numerical values is a header, not a result.
+- Do NOT include entries where actualValue is a text string like "Par Value Test" or "Not specified" — these are not test results.
+- CRITICAL: For EVERY compliance test, you MUST extract both actualValue AND triggerLevel as numbers. Every test has a trigger/threshold — look for columns "Trigger", "Limit", "Threshold", "Required", "Min", "Max", "Test Level". If "Actual: 71.1, Required: 62.5", then actualValue=71.1 and triggerLevel=62.5.
+- For WARF, the trigger may be labeled "Maximum" (e.g. "Maximum WARF: 2850"). For WAS/spread tests, "Minimum" (e.g. "Minimum WAS: 3.90%"). For WAL, "Maximum WAL: 5.0 years". Always capture these as triggerLevel.
+
+GENERAL:
 - Percentages should be numbers (e.g. 5.2 not "5.2%").
 - Monetary amounts should be raw numbers without currency symbols.
 - Look for this data in sections titled: "Compliance Tests", "Coverage Tests", "OC Test", "IC Test", "Par Value Test", "Collateral Quality Tests", "Pool Summary", "Portfolio Summary", "Account Balances", "Par Value Adjustments", "Report Summary", "Deal Information".
@@ -124,7 +142,7 @@ Rules:
 
 export function pass2Prompt(reportDate: string): { system: string; user: string } {
   return {
-    system: `You are a CLO compliance report analyst. Extract the FULL holdings/portfolio schedule into the exact JSON schema below. Token budget hint: 32768.
+    system: `You are a CLO compliance report analyst. Extract the FULL holdings/portfolio schedule into the exact JSON schema below. Token budget hint: 65536.
 
 Return a single JSON object (no markdown fences, no explanation) with this structure:
 
@@ -194,7 +212,23 @@ Rules:
 - Dates in YYYY-MM-DD format.
 - Boolean flags should be true/false/null, not strings.
 - Look for this data in sections titled: "Portfolio Schedule", "Holdings Schedule", "Collateral Schedule", "Asset Schedule", "Portfolio Holdings", "Schedule of Investments", "Loan Schedule".
-- INDUSTRY ENRICHMENT — CRITICAL: Many compliance reports list industry/sector classification in a SEPARATE table (e.g., "Portfolio by Industry", "Industry Distribution", "Obligor List with Industry Code"). If the main holdings schedule does NOT include industry per holding, look for a separate industry classification table and CROSS-REFERENCE it with the holdings by obligor name. Similarly for spread: if the main schedule doesn't include spread per holding, look for a "Spread Distribution" or "Loan Characteristics" table that lists spreads by obligor. Prioritize filling industryDescription and spreadBps for EVERY holding where data exists anywhere in the report.
+
+MULTI-TABLE FORMAT — CRITICAL:
+- Many reports split holdings across MULTIPLE tables with DIFFERENT columns:
+  - "Asset Information I" or "Schedule I": obligor names, ISIN/LX IDs, par balance, principal balance, market value, prices, settlement status
+  - "Asset Information II" or "Schedule II": ratings (Moody's, S&P, Fitch), rating factors, recovery rates, industry codes, country
+  - "Asset Information III" or "Schedule III": coupon/spread, reference rate, maturity date, acquisition date, boolean flags (cov-lite, revolving, PIK, fixed rate)
+- You MUST cross-reference ALL tables by position/row order or obligor name to produce ONE complete holding entry per asset.
+- Do NOT create separate entries for the same asset from different tables. Merge them.
+- The same obligor may appear with slightly different names across tables (e.g. "ABC Corp" vs "ABC Corporation") — match by position order within the table.
+
+COMPLETENESS — CRITICAL:
+- CLO portfolios typically have 100-250 positions. You MUST extract EVERY SINGLE ONE.
+- Do NOT stop partway through. Continue extracting until you have processed every row in every asset table.
+- If the portfolio spans many pages, keep going. Extract positions from A through Z.
+- Use null for fields not present in a particular table — do NOT skip the holding entirely.
+
+- INDUSTRY ENRICHMENT: Many compliance reports list industry/sector classification in a SEPARATE table (e.g., "Portfolio by Industry", "Industry Distribution", "Obligor List with Industry Code"). If the main holdings schedule does NOT include industry per holding, look for a separate industry classification table and CROSS-REFERENCE it with the holdings by obligor name. Similarly for spread: if the main schedule doesn't include spread per holding, look for a "Spread Distribution" or "Loan Characteristics" table that lists spreads by obligor. Prioritize filling industryDescription and spreadBps for EVERY holding where data exists anywhere in the report.
 - If you encounter ANY data not captured in the schema above, put it in _overflow with a descriptive label. Never silently drop data.`,
     user: `Extract the complete holdings schedule from the attached compliance/trustee report. Report date context: ${reportDate}. Return only the JSON object, no markdown fences.`,
   };
@@ -202,7 +236,7 @@ Rules:
 
 export function pass3Prompt(reportDate: string): { system: string; user: string } {
   return {
-    system: `You are a CLO compliance report analyst. Extract ALL concentration and distribution details into the exact JSON schema below. Token budget hint: 8192.
+    system: `You are a CLO compliance report analyst. Extract ALL concentration and distribution details into the exact JSON schema below. Token budget hint: 65536.
 
 Return a single JSON object (no markdown fences, no explanation) with this structure:
 
@@ -249,7 +283,7 @@ Rules:
 
 export function pass4Prompt(reportDate: string): { system: string; user: string } {
   return {
-    system: `You are a CLO compliance report analyst. Extract waterfall details, cash flow proceeds, ALL trades, trading summary, and tranche snapshots into the exact JSON schema below. Token budget hint: 8192.
+    system: `You are a CLO compliance report analyst. Extract waterfall details, cash flow proceeds, ALL trades, trading summary, and tranche snapshots into the exact JSON schema below. Token budget hint: 65536.
 
 Return a single JSON object (no markdown fences, no explanation) with this structure:
 
@@ -345,12 +379,32 @@ Rules:
 - Extract ONLY explicitly stated values. Use null for missing fields. Never fabricate data.
 - Extract ALL waterfall steps in priority order for both interest and principal waterfalls.
 - Extract ALL trades — purchases, sales, paydowns, prepayments, defaults, recoveries.
-- Extract tranche snapshots for EVERY note class (A through equity/subordinated notes).
-- Monetary amounts should be raw numbers without currency symbols.
+- Monetary amounts should be raw numbers without currency symbols (e.g. 115000000, not "115,000,000.00" or "EUR 115M").
 - Prices should be numeric (e.g. 99.5).
-- Rates should be numeric percentages (e.g. 4.72 for 4.72%).
+- Rates should be numeric percentages (e.g. 4.72 for 4.72%, or 6.106 for 6.106%).
 - Dates in YYYY-MM-DD format.
-- Look for this data in sections titled: "Interest Waterfall", "Principal Waterfall", "Payment Waterfall", "Proceeds", "Collections", "Trading Activity", "Purchases and Sales", "Paydowns", "Tranche Summary", "Note Summary", "Class Summary", "Payment Summary".
+
+TRANCHE SNAPSHOTS — CRITICAL:
+- This is the MOST important data for the waterfall model. Extract a snapshot for EVERY note class.
+- Look for the "Compliance Summary", "Note Summary", "Tranche Summary", or "Capital Structure" table.
+- This table typically has columns: Tranche Name, Original Balance, Current Balance, All-in Rate, Spread, Rating, Interest Amount, Maturity Date.
+- WARNING: These tables often have columns that WRAP across multiple lines or have sub-columns. The "All in Rate" and "Spread" might be on the same row as the tranche name but offset. Read carefully.
+- For each tranche, extract:
+  - className: Use the FULL tranche name as it appears (e.g., "Class A Senior Secured Floating Rate Notes due 2035", NOT abbreviated to "Class A Notes")
+  - currentBalance: The "Current Balance" or "Outstanding" column value as a number
+  - beginningBalance: The "Original Balance" or "Initial Balance" column value as a number
+  - couponRate: The "All-in Rate" or "Coupon" as a percentage number (e.g., 6.106 for 6.106%)
+- Common tranche types in CLO reports: Class A (may split into Loan + Notes), Class B (may split into B-1 floating + B-2 fixed), Class C, D, E, F, and Subordinated Notes.
+- If there are BOTH aggregated ("Class A Notes") and detailed ("Class A Loan" + "Class A Notes") entries, extract ONLY the detailed individual entries, NOT the aggregate.
+
+WATERFALL:
+- Look in sections titled: "Interest Waterfall", "Principal Waterfall", "Payment Waterfall", "Priority of Payments", "Proceeds", "Collections".
+- For each step, look for the specific euro/dollar amount paid and any shortfall.
+- Steps that mention "if [test] not satisfied" or "redemption of Notes" are OC/IC diversion steps — set isOcTestDiversion=true.
+
+TRADES:
+- Look in: "Trading Activity", "Purchases and Sales", "Paydowns", "Portfolio Changes".
+
 - If you encounter ANY data not captured in the schema above, put it in _overflow with a descriptive label. Never silently drop data.`,
     user: `Extract waterfall details, cash flow proceeds, all trades, trading summary, and tranche snapshots from the attached compliance/trustee report. Report date context: ${reportDate}. Return only the JSON object, no markdown fences.`,
   };
@@ -358,7 +412,7 @@ Rules:
 
 export function pass5Prompt(reportDate: string): { system: string; user: string } {
   return {
-    system: `You are a CLO compliance report analyst. Extract ALL supplementary data — fees, hedging, FX, rating agency analytics, events, tax, regulatory, eligibility, reinvestment constraints, sale limitations, and test matrices — into the exact JSON schema below. Token budget hint: 8192.
+    system: `You are a CLO compliance report analyst. Extract ALL supplementary data — fees, hedging, FX, rating agency analytics, events, tax, regulatory, eligibility, reinvestment constraints, sale limitations, and test matrices — into the exact JSON schema below. Token budget hint: 65536.
 
 Return a single JSON object (no markdown fences, no explanation) with this structure:
 

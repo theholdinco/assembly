@@ -180,7 +180,7 @@ export async function runExtraction(
 
   // Pass 1: blocking — we need reportDate before anything else
   const p1Prompt = pass1Prompt();
-  const p1Result = await callClaudeStructured(apiKey, p1Prompt.system, documents, p1Prompt.user, 8192, pass1Schema, "extract_pass1");
+  const p1Result = await callClaudeStructured(apiKey, p1Prompt.system, documents, p1Prompt.user, 65536, pass1Schema, "extract_pass1");
 
   if (p1Result.error) {
     throw new Error(`Pass 1 API error: ${p1Result.error}`);
@@ -247,10 +247,10 @@ export async function runExtraction(
   }
 
   const [p2Result, p3Result, p4Result, p5Result] = await Promise.all([
-    callClaudeStructured(apiKey, pass2Prompt(reportDate).system, documents, pass2Prompt(reportDate).user, 32768, pass2Schema, "extract_pass2"),
-    callClaudeStructured(apiKey, pass3Prompt(reportDate).system, documents, pass3Prompt(reportDate).user, 8192, pass3Schema, "extract_pass3"),
-    callClaudeStructured(apiKey, pass4Prompt(reportDate).system, documents, pass4Prompt(reportDate).user, 8192, pass4Schema, "extract_pass4"),
-    callClaudeStructured(apiKey, pass5Prompt(reportDate).system, documents, pass5Prompt(reportDate).user, 8192, pass5Schema, "extract_pass5"),
+    callClaudeStructured(apiKey, pass2Prompt(reportDate).system, documents, pass2Prompt(reportDate).user, 65536, pass2Schema, "extract_pass2"),
+    callClaudeStructured(apiKey, pass3Prompt(reportDate).system, documents, pass3Prompt(reportDate).user, 65536, pass3Schema, "extract_pass3"),
+    callClaudeStructured(apiKey, pass4Prompt(reportDate).system, documents, pass4Prompt(reportDate).user, 65536, pass4Schema, "extract_pass4"),
+    callClaudeStructured(apiKey, pass5Prompt(reportDate).system, documents, pass5Prompt(reportDate).user, 65536, pass5Schema, "extract_pass5"),
   ]);
 
   const passInputs = [
@@ -334,6 +334,43 @@ export async function runExtraction(
         }
 
         await batchInsert("clo_tranche_snapshots", [{ tranche_id: existing[0].id, ...snapshot.data }]);
+
+        // Enrich the tranche record with financial data from the snapshot
+        const bal = snapshot.data.current_balance ?? snapshot.data.beginning_balance;
+        const rate = snapshot.data.coupon_rate;
+        if (bal != null || rate != null) {
+          const setClauses: string[] = [];
+          const setValues: unknown[] = [];
+          let pi = 1;
+          if (bal != null) { setClauses.push(`original_balance = $${pi++}`); setValues.push(bal); }
+          // Store coupon rate as spread_bps (rate * 100 to convert % to bps)
+          if (rate != null) { setClauses.push(`spread_bps = $${pi++}`); setValues.push(Number(rate) * 100); }
+          if (setClauses.length > 0) {
+            setValues.push(existing[0].id);
+            await query(
+              `UPDATE clo_tranches SET ${setClauses.join(", ")} WHERE id = $${pi}`,
+              setValues,
+            );
+          }
+        }
+      }
+
+      // Infer maturity date from tranche names (e.g., "due 2035" → parse from full name)
+      const maturityDates: string[] = [];
+      for (const s of normalized.trancheSnapshots) {
+        const m = s.className.match(/due\s+(\d{4})/i);
+        if (m) maturityDates.push(m[1]);
+      }
+      if (maturityDates.length > 0) {
+        const maxYear = Math.max(...maturityDates.map(Number));
+        // Update deal with inferred maturity if not already set properly
+        await query(
+          `UPDATE clo_deals SET stated_maturity_date = COALESCE(
+            CASE WHEN stated_maturity_date IS NOT NULL AND stated_maturity_date ~ '\\d{4}-\\d{2}-\\d{2}' THEN stated_maturity_date ELSE NULL END,
+            $1
+          ) WHERE id = $2`,
+          [`${maxYear}-07-15`, dealId],
+        );
       }
     }
   }
