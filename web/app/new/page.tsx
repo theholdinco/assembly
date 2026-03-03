@@ -167,12 +167,15 @@ export default function NewAssemblyPage() {
           const form = new FormData();
           form.append("file", f.file);
           const uploadRes = await fetch(`/api/assemblies/${id}/upload`, { method: "POST", body: form });
-          if (!uploadRes.ok) throw new Error("Upload failed");
+          if (!uploadRes.ok) {
+            const errBody = await uploadRes.json().catch(() => ({}));
+            throw new Error(errBody.error || `Upload failed (${uploadRes.status})`);
+          }
         }
         await fetch(`/api/assemblies/${id}/upload`, { method: "PATCH" });
-      } catch {
+      } catch (err) {
         await fetch(`/api/assemblies/${id}/upload`, { method: "DELETE" });
-        setError("File upload failed. Please try again.");
+        setError(err instanceof Error ? err.message : "File upload failed. Please try again.");
         setSubmitting(false);
         return;
       }
