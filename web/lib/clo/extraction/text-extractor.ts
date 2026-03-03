@@ -38,48 +38,82 @@ Rules:
   return { system, user };
 }
 
+const MAX_TRANSCRIPTION_PAGES = 25;
+
+async function extractSectionChunk(
+  apiKey: string,
+  pdfDocument: CloDocument,
+  section: SectionEntry,
+  chunkStart: number,
+  chunkEnd: number,
+): Promise<{ markdown: string; truncated: boolean; error?: string }> {
+  const chunkBase64 = await extractPdfPages(pdfDocument.base64, chunkStart, chunkEnd);
+
+  const chunkDoc: CloDocument = {
+    name: `${pdfDocument.name} (${section.sectionType} pp.${chunkStart}-${chunkEnd})`,
+    type: "application/pdf",
+    size: chunkBase64.length,
+    base64: chunkBase64,
+  };
+
+  const pageCount = chunkEnd - chunkStart + 1;
+  const maxTokens = Math.min(64000, pageCount * 2000);
+
+  const { system, user } = transcriptionPrompt(section);
+
+  const result = await callAnthropicForText(apiKey, system, [chunkDoc], user, maxTokens);
+
+  if (result.error) {
+    return { markdown: "", truncated: false, error: result.error };
+  }
+
+  return { markdown: result.text, truncated: result.truncated };
+}
+
 export async function extractSectionText(
   apiKey: string,
   pdfDocument: CloDocument,
   section: SectionEntry,
 ): Promise<SectionText> {
-  const sectionBase64 = await extractPdfPages(
-    pdfDocument.base64,
-    section.pageStart,
-    section.pageEnd,
-  );
-
-  const sectionDoc: CloDocument = {
-    name: `${pdfDocument.name} (${section.sectionType} pp.${section.pageStart}-${section.pageEnd})`,
-    type: "application/pdf",
-    size: sectionBase64.length,
-    base64: sectionBase64,
-  };
-
   const pageCount = section.pageEnd - section.pageStart + 1;
-  const maxTokens = Math.min(64000, pageCount * 2000);
 
-  const { system, user } = transcriptionPrompt(section);
-
-  const result = await callAnthropicForText(apiKey, system, [sectionDoc], user, maxTokens);
-
-  if (result.error) {
-    console.error(`[text-extractor] Failed for section "${section.sectionType}" (pages ${section.pageStart}-${section.pageEnd}): ${result.error}`);
+  // Small section — send directly
+  if (pageCount <= MAX_TRANSCRIPTION_PAGES) {
+    const result = await extractSectionChunk(apiKey, pdfDocument, section, section.pageStart, section.pageEnd);
+    if (result.error) {
+      console.error(`[text-extractor] Failed for section "${section.sectionType}" (pages ${section.pageStart}-${section.pageEnd}): ${result.error}`);
+    }
     return {
       sectionType: section.sectionType,
       pageStart: section.pageStart,
       pageEnd: section.pageEnd,
-      markdown: "",
-      truncated: false,
+      markdown: result.markdown,
+      truncated: result.truncated,
     };
+  }
+
+  // Large section — chunk and transcribe sequentially, then concatenate
+  console.log(`[text-extractor] Section "${section.sectionType}" has ${pageCount} pages, chunking into groups of ${MAX_TRANSCRIPTION_PAGES}`);
+  const markdownParts: string[] = [];
+  let anyTruncated = false;
+
+  for (let start = section.pageStart; start <= section.pageEnd; start += MAX_TRANSCRIPTION_PAGES) {
+    const end = Math.min(start + MAX_TRANSCRIPTION_PAGES - 1, section.pageEnd);
+    const result = await extractSectionChunk(apiKey, pdfDocument, section, start, end);
+    if (result.error) {
+      console.error(`[text-extractor] Failed chunk pages ${start}-${end} of "${section.sectionType}": ${result.error}`);
+      continue; // Skip failed chunk, keep others
+    }
+    if (result.markdown) markdownParts.push(result.markdown);
+    if (result.truncated) anyTruncated = true;
   }
 
   return {
     sectionType: section.sectionType,
     pageStart: section.pageStart,
     pageEnd: section.pageEnd,
-    markdown: result.text,
-    truncated: result.truncated,
+    markdown: markdownParts.join("\n\n"),
+    truncated: anyTruncated,
   };
 }
 

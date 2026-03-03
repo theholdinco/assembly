@@ -4,11 +4,12 @@ import { chunkDocuments, MAX_PDF_PAGES } from "./pdf-chunking";
 interface AnthropicBlock { type: string; text?: string }
 
 const RETRY_DELAYS = [5000, 15000, 30000]; // 3 retries with backoff
+const FETCH_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — large PDFs need time
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
-      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(5 * 60 * 1000) });
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       // Retry on transient server errors
       if ((response.status >= 500 || response.status === 529) && attempt < RETRY_DELAYS.length) {
         console.log(`[anthropic] ${response.status} on attempt ${attempt + 1}, retrying in ${RETRY_DELAYS[attempt]}ms`);
