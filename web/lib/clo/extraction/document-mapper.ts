@@ -156,10 +156,20 @@ function deduplicatePageRanges(sections: SectionEntry[]): SectionEntry[] {
   const result: SectionEntry[] = [];
 
   for (const section of sorted) {
+    const pageCount = section.pageEnd - section.pageStart + 1;
+
     // Find unclaimed pages in this section's range
     const unclaimed: number[] = [];
     for (let p = section.pageStart; p <= section.pageEnd; p++) {
       if (!claimed.has(p)) unclaimed.push(p);
+    }
+
+    // Small sections (≤3 pages): allow overlap rather than dropping them entirely
+    // These are often legitimately on the same pages as another section (e.g., key_parties on the cover page)
+    if (unclaimed.length === 0 && pageCount <= 3) {
+      console.log(`[document-mapper] keeping ${section.sectionType}(pp${section.pageStart}-${section.pageEnd}) despite overlap (small section)`);
+      result.push(section);
+      continue;
     }
 
     if (unclaimed.length === 0) {

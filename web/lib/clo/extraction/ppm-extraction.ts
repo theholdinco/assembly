@@ -2,7 +2,7 @@ import type { CloDocument } from "../types";
 import type { ProgressCallback } from "./runner";
 import { mapDocument } from "./document-mapper";
 import { extractAllSectionTexts } from "./text-extractor";
-import { extractAllSections } from "./section-extractor";
+import { extractAllSections, extractSection } from "./section-extractor";
 import { normalizePpmSectionResults } from "./normalizer";
 
 export async function runSectionPpmExtraction(
@@ -37,6 +37,33 @@ export async function runSectionPpmExtraction(
     const result = sectionResults[i];
     sections[result.sectionType] = result.data;
     rawOutputs[result.sectionType] = sectionTexts[i]?.markdown ?? "";
+  }
+
+  // Fallback: if key_dates returned all nulls, re-extract from transaction_overview text
+  // (dates often appear in the term sheet/summary which the mapper may assign to transaction_overview)
+  const keyDatesData = sections.key_dates as Record<string, unknown> | null;
+  const allDatesNull = keyDatesData && Object.values(keyDatesData).every((v) => v == null);
+  if (allDatesNull) {
+    const overviewText = sectionTexts.find((t) => t.sectionType === "transaction_overview");
+    const capStructText = sectionTexts.find((t) => t.sectionType === "capital_structure");
+    // Combine available term sheet texts for date extraction
+    const fallbackTexts = [overviewText, capStructText].filter(Boolean);
+    if (fallbackTexts.length > 0) {
+      const combinedMarkdown = fallbackTexts.map((t) => t!.markdown).join("\n\n---\n\n");
+      console.log(`[ppm-extraction] key_dates all null — retrying extraction from transaction_overview + capital_structure text (${combinedMarkdown.length} chars)`);
+      const fallbackResult = await extractSection(
+        apiKey,
+        { sectionType: "key_dates", pageStart: 0, pageEnd: 0, markdown: combinedMarkdown, truncated: false },
+        "ppm",
+      );
+      if (fallbackResult.data) {
+        const hasValues = Object.values(fallbackResult.data).some((v) => v != null);
+        if (hasValues) {
+          console.log(`[ppm-extraction] key_dates fallback succeeded`);
+          sections.key_dates = fallbackResult.data;
+        }
+      }
+    }
   }
 
   // Log detailed extraction summary per section
