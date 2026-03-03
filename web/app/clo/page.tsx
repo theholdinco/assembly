@@ -439,7 +439,7 @@ function LegacyConcentrationsSection({ concentrations }: { concentrations: Extra
 }
 
 function AccountBalancesSection({ balances }: { balances: CloAccountBalance[] }) {
-  const withData = balances?.filter((b) => b.balanceAmount != null);
+  const withData = balances?.filter((b) => b.balanceAmount != null && b.balanceAmount !== 0);
   if (!withData || withData.length === 0) return null;
 
   return (

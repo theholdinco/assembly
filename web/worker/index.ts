@@ -15,7 +15,7 @@ import {
 } from "./clo-pipeline.js";
 import { runScanPipeline } from "./pulse-pipeline.js";
 import { runSectionPpmExtraction } from "../lib/clo/extraction/ppm-extraction.js";
-import { runSectionExtraction } from "../lib/clo/extraction/runner.js";
+import { runExtraction, runSectionExtraction } from "../lib/clo/extraction/runner.js";
 import { runPortfolioExtraction } from "../lib/clo/extraction/portfolio-extraction.js";
 import { normalizeClassName } from "../lib/clo/api.js";
 import type { CapitalStructureEntry } from "../lib/clo/types.js";
@@ -715,6 +715,18 @@ async function syncPpmToRelationalTables(
     );
     console.log(`[worker] syncPpm: updated deal dates (maturity=${maturityDate}, reinvEnd=${reinvestmentEnd}, nonCallEnd=${nonCallEnd})`);
   }
+
+  // Sync collateral manager name
+  const cmDetails = extractedConstraints.cmDetails as Record<string, unknown> | undefined;
+  const keyParties = extractedConstraints.keyParties as Record<string, unknown> | undefined;
+  const cmName = (cmDetails?.name as string) ?? (keyParties?.collateralManager as string) ?? null;
+  if (cmName) {
+    await pool.query(
+      `UPDATE clo_deals SET collateral_manager = $1 WHERE id = $2 AND (collateral_manager IS NULL OR collateral_manager = '')`,
+      [cmName, dealId],
+    );
+    console.log(`[worker] syncPpm: updated collateral_manager=${cmName}`);
+  }
 }
 
 // ─── CLO Extraction Jobs ─────────────────────────────────────────────
@@ -822,13 +834,7 @@ async function pollCloExtractionJobs() {
           [job.id]
         );
       } else {
-        const reportProgress = async (step: string, detail?: string) => {
-          await pool.query(
-            `UPDATE clo_profiles SET report_extraction_progress = $1::jsonb, updated_at = now() WHERE id = $2`,
-            [JSON.stringify({ step, detail, updatedAt: new Date().toISOString() }), job.id]
-          );
-        };
-        await runSectionExtraction(job.id, apiKey, complianceDocs, reportProgress);
+        await runExtraction(job.id, apiKey, complianceDocs);
         await pool.query(
           `UPDATE clo_profiles
            SET report_extraction_status = 'complete',
