@@ -205,7 +205,9 @@ export function ppmTransactionOverviewPrompt(): Prompt {
   return {
     system: `You are extracting the transaction overview from a CLO private placement memorandum's markdown text.
 
-Extract deal identity: dealName, issuerLegalName, jurisdiction, entityType, governingLaw, currency, listingExchange.
+Extract deal identity: dealName, issuerLegalName, collateralManager, jurisdiction, entityType, governingLaw, currency, listingExchange.
+
+The Collateral Manager is the entity managing the CLO's loan portfolio. Look for "The Collateral Manager is [name]", "[name] (as Collateral Manager)", or a "Collateral Manager" row in the transaction summary table.
 
 ${COMMON_RULES}`,
     user: `Extract the transaction overview from the following markdown text.`,
@@ -218,6 +220,9 @@ export function ppmCapitalStructurePrompt(): Prompt {
 
 CRITICAL: Extract ALL tranches from Class A through subordinated/equity notes.
 For each tranche: class, designation, principalAmount, rateType, referenceRate, spreadBps, spread, rating (fitch, sp), deferrable, maturityDate, isSubordinated.
+
+spreadBps MUST be a NUMBER in basis points. Convert from percentage: "EURIBOR + 1.50%" = spreadBps: 150. Convert from string: "E + 150bps" = spreadBps: 150.
+principalAmount should include the full string with currency, e.g., "EUR 248,000,000".
 
 IMPORTANT — each tranche MUST be a COMPLETE object with ALL its fields. Do NOT interleave fields from different tranches. Process one tranche at a time, from Class A to Subordinated.
 
@@ -332,6 +337,8 @@ CRITICAL: Extract ACTUAL DATE VALUES, not field labels.
 - maturityDate should be "2035-07-15" not "Maturity Date".
 - Look in the summary/term sheet sections for actual dates.
 - If only month/year is given, use the 15th (e.g., "July 2035" -> "2035-07-15").
+- These dates are often in a STRUCTURED TABLE in the Transaction Overview or Term Sheet section. Look for rows/columns labeled with date names.
+- The reinvestment period and non-call period are KEY dates for CLO waterfall modeling — search thoroughly.
 
 Extract: originalIssueDate, currentIssueDate, maturityDate, nonCallPeriodEnd, reinvestmentPeriodEnd, firstPaymentDate, paymentFrequency.
 
@@ -358,6 +365,8 @@ export function ppmKeyPartiesPrompt(): Prompt {
 Extract key parties: role, entity (e.g., Trustee, Collateral Manager, Issuer, Arranger, Placement Agent, etc.)
 
 Extract collateral manager details: name, parent, replacementMechanism.
+
+cmDetails.name is the MOST IMPORTANT field. The Collateral Manager is the entity that manages the CLO's loan portfolio. Look for "The Collateral Manager is [name]" or "[name] (as Collateral Manager)".
 
 ${COMMON_RULES}`,
     user: `Extract all key parties from the following markdown text.`,

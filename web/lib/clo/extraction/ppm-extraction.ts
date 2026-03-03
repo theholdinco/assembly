@@ -1,7 +1,7 @@
 import type { CloDocument } from "../types";
 import type { ProgressCallback } from "./runner";
 import { mapDocument } from "./document-mapper";
-import { extractAllSectionTexts } from "./text-extractor";
+import { extractPdfText } from "./pdf-text-extractor";
 import { extractAllSections, extractSection } from "./section-extractor";
 import { normalizePpmSectionResults } from "./normalizer";
 
@@ -19,10 +19,20 @@ export async function runSectionPpmExtraction(
   const documentMap = await mapDocument(apiKey, documents);
   await progress("mapping_done", `Found ${documentMap.sections.length} sections`);
 
-  // Phase 2: Transcribe sections to markdown (parallel)
-  await progress("transcribing", `Transcribing ${documentMap.sections.length} sections to text...`);
-  const sectionTexts = await extractAllSectionTexts(apiKey, pdfDoc, documentMap);
-  await progress("transcribing_done", `Transcribed ${sectionTexts.filter((t) => t.markdown.length > 0).length}/${documentMap.sections.length} sections`);
+  // Phase 2: Extract text with pdfplumber (replaces Claude transcription)
+  await progress("transcribing", `Extracting text from ${documentMap.sections.length} sections via pdfplumber...`);
+  const pdfText = await extractPdfText(pdfDoc.base64);
+  const sectionTexts = documentMap.sections.map((section) => ({
+    sectionType: section.sectionType,
+    pageStart: section.pageStart,
+    pageEnd: section.pageEnd,
+    markdown: pdfText.pages
+      .filter((p) => p.page >= section.pageStart && p.page <= section.pageEnd)
+      .map((p) => p.text)
+      .join("\n\n"),
+    truncated: false,
+  }));
+  await progress("transcribing_done", `Extracted text for ${sectionTexts.filter((t) => t.markdown.length > 0).length}/${documentMap.sections.length} sections`);
 
   // Phase 3: Extract structured data per section (parallel)
   await progress("extracting", `Extracting structured data from sections...`);

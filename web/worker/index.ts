@@ -718,8 +718,13 @@ async function syncPpmToRelationalTables(
 
   // Sync collateral manager name
   const cmDetails = extractedConstraints.cmDetails as Record<string, unknown> | undefined;
-  const keyParties = extractedConstraints.keyParties as Record<string, unknown> | undefined;
-  const cmName = (cmDetails?.name as string) ?? (keyParties?.collateralManager as string) ?? null;
+  const keyPartiesArray = Array.isArray(extractedConstraints.keyParties)
+    ? extractedConstraints.keyParties as Array<{ role?: string; entity?: string }>
+    : [];
+  const cmFromKeyParties = keyPartiesArray.find(
+    (p) => p.role?.toLowerCase().includes("collateral manager"),
+  )?.entity;
+  const cmName = (cmDetails?.name as string) ?? cmFromKeyParties ?? null;
   if (cmName) {
     await pool.query(
       `UPDATE clo_deals SET collateral_manager = $1 WHERE id = $2 AND (collateral_manager IS NULL OR collateral_manager = '')`,

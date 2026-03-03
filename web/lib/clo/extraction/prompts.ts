@@ -228,6 +228,9 @@ COMPLETENESS — CRITICAL:
 - If the portfolio spans many pages, keep going. Extract positions from A through Z.
 - Use null for fields not present in a particular table — do NOT skip the holding entirely.
 
+- parBalance is the MOST CRITICAL field. In text-based extraction, look for columns labeled "Par Amount", "Principal Amount", "Notional", "Current Balance", or "Outstanding". These are usually right-aligned numbers in the table.
+- Asset tables may be labeled "Asset Information I" (loans), "Asset Information II" (bonds), "Asset Information III" (other). Extract from ALL tables.
+
 - INDUSTRY ENRICHMENT: Many compliance reports list industry/sector classification in a SEPARATE table (e.g., "Portfolio by Industry", "Industry Distribution", "Obligor List with Industry Code"). If the main holdings schedule does NOT include industry per holding, look for a separate industry classification table and CROSS-REFERENCE it with the holdings by obligor name. Similarly for spread: if the main schedule doesn't include spread per holding, look for a "Spread Distribution" or "Loan Characteristics" table that lists spreads by obligor. Prioritize filling industryDescription and spreadBps for EVERY holding where data exists anywhere in the report.
 - If you encounter ANY data not captured in the schema above, put it in _overflow with a descriptive label. Never silently drop data.`,
     user: `Extract the complete holdings schedule from the attached compliance/trustee report. Report date context: ${reportDate}. Return only the JSON object, no markdown fences.`,
@@ -267,6 +270,7 @@ Return a single JSON object (no markdown fences, no explanation) with this struc
 Rules:
 - Extract ONLY explicitly stated values. Use null for missing fields. Never fabricate data.
 - Extract EVERY distribution bucket for each concentration type: industry, country, obligor, rating, maturity, spread, asset type, currency.
+- Every concentration bucket MUST have actualPct populated. Look for "% of Portfolio", "Current %", "% of Collateral" columns.
 - For industry distributions, capture every Moody's/S&P industry classification row.
 - For country distributions, capture every country row.
 - For single obligor concentrations, capture the top exposures with limits.
@@ -386,6 +390,7 @@ Rules:
 
 TRANCHE SNAPSHOTS — CRITICAL:
 - This is the MOST important data for the waterfall model. Extract a snapshot for EVERY note class.
+- Tranche details are typically on pages 1-2 of the compliance report in a "Header & Tranche Details" or "Note Summary" table. currentBalance and couponRate are ESSENTIAL.
 - Look for the "Compliance Summary", "Note Summary", "Tranche Summary", or "Capital Structure" table.
 - This table typically has columns: Tranche Name, Original Balance, Current Balance, All-in Rate, Spread, Rating, Interest Amount, Maturity Date.
 - WARNING: These tables often have columns that WRAP across multiple lines or have sub-columns. The "All in Rate" and "Spread" might be on the same row as the tranche name but offset. Read carefully.

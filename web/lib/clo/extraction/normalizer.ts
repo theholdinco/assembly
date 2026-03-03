@@ -383,7 +383,10 @@ export function normalizePpmSectionResults(
   const result: Record<string, unknown> = {};
 
   const txOverview = sections.transaction_overview;
-  if (txOverview) result.dealIdentity = txOverview;
+  if (txOverview) {
+    result.dealIdentity = txOverview;
+    if (txOverview.collateralManager) result.collateralManager = txOverview.collateralManager;
+  }
 
   const capStructure = sections.capital_structure;
   if (capStructure) {

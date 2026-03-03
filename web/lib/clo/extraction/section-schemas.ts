@@ -311,6 +311,7 @@ export type Supplementary = z.infer<typeof supplementarySchema>;
 export const transactionOverviewSchema = z.object({
   dealName: z.string().optional(),
   issuerLegalName: z.string().optional(),
+  collateralManager: z.string().optional(),
   jurisdiction: z.string().optional(),
   entityType: z.string().optional(),
   governingLaw: z.string().optional(),

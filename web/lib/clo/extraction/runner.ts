@@ -10,6 +10,7 @@ import { mapDocument } from "./document-mapper";
 import { extractAllSectionTexts, extractSectionText, type SectionText } from "./text-extractor";
 import { extractAllSections, extractSection } from "./section-extractor";
 import { normalizeSectionResults } from "./normalizer";
+import { extractPdfText } from "./pdf-text-extractor";
 // Common field name aliases the model returns → correct DB column names
 const POOL_SUMMARY_ALIASES: Record<string, string> = {
   aggregate_principal_balance: "total_principal_balance",
@@ -111,6 +112,7 @@ async function callClaudeStructured(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema: any,
   toolName: string,
+  extractedText?: string,
 ): Promise<{ data: Record<string, unknown> | null; truncated: boolean; error?: string; status?: number }> {
   const inputSchema = zodToToolSchema(schema);
 
@@ -120,7 +122,17 @@ async function callClaudeStructured(
     inputSchema,
   };
 
-  const chunked = await callAnthropicChunkedWithTool(apiKey, system, documents, userText, maxTokens, tool);
+  // If pre-extracted text is available, use text content blocks instead of PDF documents
+  const docsToSend = extractedText
+    ? [{ name: "extracted-text", type: "text/plain", size: extractedText.length, base64: "" } as CloDocument]
+    : documents;
+  const userTextToSend = extractedText
+    ? `${userText}\n\n--- DOCUMENT TEXT ---\n${extractedText}`
+    : userText;
+
+  const chunked = extractedText
+    ? await callAnthropicChunkedWithTool(apiKey, system, [], userTextToSend, maxTokens, tool)
+    : await callAnthropicChunkedWithTool(apiKey, system, docsToSend, userText, maxTokens, tool);
 
   if (chunked.error) {
     return { data: null, truncated: false, error: chunked.error, status: chunked.status };
@@ -237,9 +249,22 @@ export async function runExtraction(
 ): Promise<{ reportPeriodId: string; status: "complete" | "partial" | "error" }> {
   const dealId = await getOrCreateDeal(profileId);
 
+  // Extract text with pdfplumber once for all passes
+  let extractedText: string | undefined;
+  const pdfDoc = documents.find((d) => d.type === "application/pdf");
+  if (pdfDoc) {
+    try {
+      const pdfText = await extractPdfText(pdfDoc.base64);
+      extractedText = pdfText.pages.map((p) => `--- Page ${p.page} ---\n${p.text}`).join("\n\n");
+      console.log(`[extraction] pdfplumber extracted ${pdfText.totalPages} pages, ${extractedText.length} chars`);
+    } catch (err) {
+      console.warn(`[extraction] pdfplumber failed, falling back to PDF documents: ${(err as Error).message}`);
+    }
+  }
+
   // Pass 1: blocking — we need reportDate before anything else
   const p1Prompt = pass1Prompt();
-  const p1Result = await callClaudeStructured(apiKey, p1Prompt.system, documents, p1Prompt.user, 64000, pass1Schema, "extract_pass1");
+  const p1Result = await callClaudeStructured(apiKey, p1Prompt.system, documents, p1Prompt.user, 64000, pass1Schema, "extract_pass1", extractedText);
 
   if (p1Result.error) {
     throw new Error(`Pass 1 API error: ${p1Result.error}`);
@@ -288,6 +313,15 @@ export async function runExtraction(
   await replaceIfPresent("clo_account_balances", p1Normalized.accountBalances);
   await replaceIfPresent("clo_par_value_adjustments", p1Normalized.parValueAdjustments);
 
+  // Propagate CM name from compliance report if deal doesn't have one
+  const cmFromReport = pass1Data.reportMetadata.collateralManager;
+  if (cmFromReport) {
+    await query(
+      `UPDATE clo_deals SET collateral_manager = $1 WHERE id = $2 AND (collateral_manager IS NULL OR collateral_manager = '')`,
+      [cmFromReport, dealId],
+    );
+  }
+
   // Passes 2-5 in parallel
   const passResults: PassResult[] = [];
   const overflowRows: Record<string, unknown>[] = [];
@@ -305,10 +339,10 @@ export async function runExtraction(
   }
 
   const [p2Result, p3Result, p4Result, p5Result] = await Promise.all([
-    callClaudeStructured(apiKey, pass2Prompt(reportDate).system, documents, pass2Prompt(reportDate).user, 64000, pass2Schema, "extract_pass2"),
-    callClaudeStructured(apiKey, pass3Prompt(reportDate).system, documents, pass3Prompt(reportDate).user, 64000, pass3Schema, "extract_pass3"),
-    callClaudeStructured(apiKey, pass4Prompt(reportDate).system, documents, pass4Prompt(reportDate).user, 64000, pass4Schema, "extract_pass4"),
-    callClaudeStructured(apiKey, pass5Prompt(reportDate).system, documents, pass5Prompt(reportDate).user, 64000, pass5Schema, "extract_pass5"),
+    callClaudeStructured(apiKey, pass2Prompt(reportDate).system, documents, pass2Prompt(reportDate).user, 64000, pass2Schema, "extract_pass2", extractedText),
+    callClaudeStructured(apiKey, pass3Prompt(reportDate).system, documents, pass3Prompt(reportDate).user, 64000, pass3Schema, "extract_pass3", extractedText),
+    callClaudeStructured(apiKey, pass4Prompt(reportDate).system, documents, pass4Prompt(reportDate).user, 64000, pass4Schema, "extract_pass4", extractedText),
+    callClaudeStructured(apiKey, pass5Prompt(reportDate).system, documents, pass5Prompt(reportDate).user, 64000, pass5Schema, "extract_pass5", extractedText),
   ]);
 
   const passInputs = [
@@ -476,7 +510,7 @@ export async function runExtraction(
           const schema = repair.pass === 2 ? pass2Schema : repair.pass === 3 ? pass3Schema : repair.pass === 4 ? pass4Schema : pass5Schema;
 
           console.log(`[extraction] Running continuation for Pass ${repair.pass}, last items: ${items.join(", ")}`);
-          const contResult = await callClaudeStructured(apiKey, contPrompt.system, documents, contPrompt.user, 64000, schema, `extract_pass${repair.pass}`);
+          const contResult = await callClaudeStructured(apiKey, contPrompt.system, documents, contPrompt.user, 64000, schema, `extract_pass${repair.pass}`, extractedText);
 
           if (contResult.data && !contResult.error) {
             const existing = pr.data as Record<string, unknown>;
@@ -521,7 +555,7 @@ export async function runExtraction(
         const repairPr = pass2RepairPrompt(reportDate, holdings.length, expectedAssets);
 
         console.log(`[extraction] Running repair extraction for Pass 2 (${holdings.length}/${expectedAssets} holdings)`);
-        const repairResult = await callClaudeStructured(apiKey, repairPr.system, documents, repairPr.user, 64000, pass2Schema, "extract_pass2");
+        const repairResult = await callClaudeStructured(apiKey, repairPr.system, documents, repairPr.user, 64000, pass2Schema, "extract_pass2", extractedText);
 
         if (repairResult.data && !repairResult.error) {
           try {
