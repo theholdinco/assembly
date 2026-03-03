@@ -112,18 +112,22 @@ async function mapDocumentChunk(
   return result.data as unknown as DocumentMap;
 }
 
-const VALID_SECTION_TYPES: Set<string> = new Set([
-  ...COMPLIANCE_SECTION_TYPES,
-  ...PPM_SECTION_TYPES,
-]);
+const COMPLIANCE_SET = new Set<string>(COMPLIANCE_SECTION_TYPES);
+const PPM_SET = new Set<string>(PPM_SECTION_TYPES);
+const ALL_SECTION_TYPES = new Set<string>([...COMPLIANCE_SECTION_TYPES, ...PPM_SECTION_TYPES]);
 
 function filterToKnownSections(map: DocumentMap): DocumentMap {
+  // Filter to section types valid for this specific document type
+  const validForDocType = map.documentType === "ppm" ? PPM_SET
+    : map.documentType === "compliance_report" ? COMPLIANCE_SET
+    : ALL_SECTION_TYPES;
+
   const before = map.sections.length;
-  const filtered = map.sections.filter((s) => VALID_SECTION_TYPES.has(s.sectionType));
+  const filtered = map.sections.filter((s) => validForDocType.has(s.sectionType));
   const removed = before - filtered.length;
   if (removed > 0) {
-    const dropped = map.sections.filter((s) => !VALID_SECTION_TYPES.has(s.sectionType)).map((s) => s.sectionType);
-    console.log(`[document-mapper] filtered out ${removed} unknown section types: ${dropped.join(", ")}`);
+    const dropped = map.sections.filter((s) => !validForDocType.has(s.sectionType)).map((s) => s.sectionType);
+    console.log(`[document-mapper] filtered out ${removed} section types not valid for ${map.documentType}: ${dropped.join(", ")}`);
   }
 
   // Deduplicate overlapping page ranges — higher-priority sections keep their pages
