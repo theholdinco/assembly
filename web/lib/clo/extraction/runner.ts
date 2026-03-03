@@ -10,7 +10,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 // zodToJsonSchema v3 doesn't support zod v4 — produces empty schemas.
 // This converts zod v4 schemas to JSON Schema for the Anthropic tool API.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function zodToToolSchema(schema: any): Record<string, unknown> {
+export function zodToToolSchema(schema: any): Record<string, unknown> {
   const result = zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0], { target: "jsonSchema7" }) as Record<string, unknown>;
   if (result.type === "object" && result.properties) {
     delete result.$schema;
@@ -20,7 +20,7 @@ function zodToToolSchema(schema: any): Record<string, unknown> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function zodV4ToJsonSchema(schema: any): Record<string, unknown> {
+export function zodV4ToJsonSchema(schema: any): Record<string, unknown> {
   const def = schema?._def;
   if (!def) return { type: "object" };
 
