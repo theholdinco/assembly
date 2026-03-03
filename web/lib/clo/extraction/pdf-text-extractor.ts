@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import path from "path";
 
 interface PdfPage {
@@ -11,11 +12,31 @@ interface PdfTextResult {
   totalPages: number;
 }
 
+function resolveScriptPath(): string {
+  // Try __dirname first (works in CJS / compiled worker)
+  if (typeof __dirname !== "undefined") {
+    // Compiled: worker/dist/lib/clo/extraction/ → scripts is at web/scripts/
+    const fromDirname = path.resolve(__dirname, "../../../../scripts/extract_pdf_text.py");
+    if (existsSync(fromDirname)) return fromDirname;
+    // Also try: relative to __dirname for dev mode (lib/clo/extraction/ → scripts/)
+    const fromDirname2 = path.resolve(__dirname, "../../../scripts/extract_pdf_text.py");
+    if (existsSync(fromDirname2)) return fromDirname2;
+  }
+  // Fallback: relative to cwd (works when running from web/ directory)
+  return path.resolve(process.cwd(), "scripts/extract_pdf_text.py");
+}
+
+function findPython(): string {
+  // In Docker/production, python binary may be "python" not "python3"
+  return process.env.PYTHON_BIN || "python3";
+}
+
 export async function extractPdfText(base64: string): Promise<PdfTextResult> {
-  const scriptPath = path.resolve(process.cwd(), "scripts/extract_pdf_text.py");
+  const scriptPath = resolveScriptPath();
+  const pythonBin = findPython();
 
   return new Promise((resolve, reject) => {
-    const proc = spawn("python3", [scriptPath], {
+    const proc = spawn(pythonBin, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -39,7 +60,7 @@ export async function extractPdfText(base64: string): Promise<PdfTextResult> {
     });
 
     proc.on("error", (err) => {
-      reject(new Error(`Failed to spawn python3: ${err.message}`));
+      reject(new Error(`Failed to spawn ${pythonBin}: ${err.message}`));
     });
 
     proc.stdin.write(base64);

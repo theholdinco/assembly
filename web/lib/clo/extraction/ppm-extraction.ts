@@ -2,6 +2,7 @@ import type { CloDocument } from "../types";
 import type { ProgressCallback } from "./runner";
 import { mapDocument } from "./document-mapper";
 import { extractPdfText } from "./pdf-text-extractor";
+import { extractAllSectionTexts } from "./text-extractor";
 import { extractAllSections, extractSection } from "./section-extractor";
 import { normalizePpmSectionResults } from "./normalizer";
 
@@ -20,18 +21,26 @@ export async function runSectionPpmExtraction(
   await progress("mapping_done", `Found ${documentMap.sections.length} sections`);
 
   // Phase 2: Extract text with pdfplumber (replaces Claude transcription)
-  await progress("transcribing", `Extracting text from ${documentMap.sections.length} sections via pdfplumber...`);
-  const pdfText = await extractPdfText(pdfDoc.base64);
-  const sectionTexts = documentMap.sections.map((section) => ({
-    sectionType: section.sectionType,
-    pageStart: section.pageStart,
-    pageEnd: section.pageEnd,
-    markdown: pdfText.pages
-      .filter((p) => p.page >= section.pageStart && p.page <= section.pageEnd)
-      .map((p) => p.text)
-      .join("\n\n"),
-    truncated: false,
-  }));
+  // Falls back to Claude vision transcription if pdfplumber is unavailable
+  await progress("transcribing", `Extracting text from ${documentMap.sections.length} sections...`);
+  let sectionTexts: Array<{ sectionType: string; pageStart: number; pageEnd: number; markdown: string; truncated: boolean }>;
+  try {
+    const pdfText = await extractPdfText(pdfDoc.base64);
+    sectionTexts = documentMap.sections.map((section) => ({
+      sectionType: section.sectionType,
+      pageStart: section.pageStart,
+      pageEnd: section.pageEnd,
+      markdown: pdfText.pages
+        .filter((p) => p.page >= section.pageStart && p.page <= section.pageEnd)
+        .map((p) => p.text)
+        .join("\n\n"),
+      truncated: false,
+    }));
+    console.log(`[ppm-extraction] pdfplumber extracted ${pdfText.totalPages} pages`);
+  } catch (err) {
+    console.warn(`[ppm-extraction] pdfplumber failed, falling back to Claude transcription: ${(err as Error).message}`);
+    sectionTexts = await extractAllSectionTexts(apiKey, pdfDoc, documentMap);
+  }
   await progress("transcribing_done", `Extracted text for ${sectionTexts.filter((t) => t.markdown.length > 0).length}/${documentMap.sections.length} sections`);
 
   // Phase 3: Extract structured data per section (parallel)
