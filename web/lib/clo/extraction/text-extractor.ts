@@ -38,7 +38,7 @@ Rules:
   return { system, user };
 }
 
-async function extractSectionText(
+export async function extractSectionText(
   apiKey: string,
   pdfDocument: CloDocument,
   section: SectionEntry,

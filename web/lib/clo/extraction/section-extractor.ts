@@ -57,7 +57,7 @@ function getSectionConfig(
   return null;
 }
 
-async function extractSection(
+export async function extractSection(
   apiKey: string,
   sectionText: SectionText,
   documentType: "compliance_report" | "ppm",
