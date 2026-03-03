@@ -38,7 +38,7 @@ Rules:
   return { system, user };
 }
 
-const MAX_TRANSCRIPTION_PAGES = 25;
+const MAX_TRANSCRIPTION_PAGES = 15;
 
 async function extractSectionChunk(
   apiKey: string,

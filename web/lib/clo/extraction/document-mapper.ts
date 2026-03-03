@@ -4,7 +4,7 @@ import { callAnthropicWithTool, buildDocumentContent } from "../api";
 import { zodToToolSchema } from "./schema-utils";
 import type { CloDocument } from "../types";
 
-const MAX_MAPPING_PAGES = 25;
+const MAX_MAPPING_PAGES = 15;
 
 // Section types for compliance reports (trustee reports / monthly reports)
 export const COMPLIANCE_SECTION_TYPES = [

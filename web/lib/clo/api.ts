@@ -7,8 +7,12 @@ const RETRY_DELAYS = [5000, 15000, 30000]; // 3 retries with backoff
 const FETCH_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — large PDFs need time
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const bodySize = typeof init.body === "string" ? init.body.length : 0;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
     try {
+      if (attempt === 0 && bodySize > 1_000_000) {
+        console.log(`[anthropic] sending ${(bodySize / 1_000_000).toFixed(1)}MB request`);
+      }
       const response = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       // Retry on transient server errors
       if ((response.status >= 500 || response.status === 529) && attempt < RETRY_DELAYS.length) {
@@ -19,7 +23,7 @@ async function fetchWithRetry(url: string, init: RequestInit): Promise<Response>
       return response;
     } catch (err) {
       if (attempt < RETRY_DELAYS.length) {
-        console.log(`[anthropic] fetch error on attempt ${attempt + 1}: ${(err as Error).message}, retrying in ${RETRY_DELAYS[attempt]}ms`);
+        console.log(`[anthropic] fetch error on attempt ${attempt + 1} (body ${(bodySize / 1_000_000).toFixed(1)}MB): ${(err as Error).message}, retrying in ${RETRY_DELAYS[attempt]}ms`);
         await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
         continue;
       }
