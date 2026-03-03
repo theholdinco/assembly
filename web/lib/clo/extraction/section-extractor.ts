@@ -48,13 +48,71 @@ function getSectionConfig(
       fees_and_expenses: { schema: schemas.ppmFeesSchema, prompt: prompts.ppmFeesPrompt },
       key_dates: { schema: schemas.ppmKeyDatesSchema, prompt: prompts.ppmKeyDatesPrompt },
       key_parties: { schema: schemas.ppmKeyPartiesSchema, prompt: prompts.ppmKeyPartiesPrompt },
-      redemption: { schema: schemas.ppmRedemptionSchema, prompt: prompts.ppmRedemptionPrompt },
-      hedging: { schema: schemas.ppmHedgingSchema, prompt: prompts.ppmHedgingPrompt },
     };
     return map[sectionType] ?? null;
   }
 
   return null;
+}
+
+function needsRepair(sectionType: string, data: Record<string, unknown> | null): boolean {
+  if (!data) return false;
+
+  if (sectionType === "capital_structure") {
+    const cap = data.capitalStructure;
+    if (!Array.isArray(cap) || cap.length === 0) return false;
+    // Check if any tranche is missing the required "class" field
+    const broken = cap.filter((t: Record<string, unknown>) => !t.class || !t.designation);
+    if (broken.length > 0) {
+      console.log(`[section-extractor] capital_structure has ${broken.length}/${cap.length} tranches with missing class/designation — scheduling repair`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function repairExtraction(
+  apiKey: string,
+  sectionText: SectionText,
+  brokenData: Record<string, unknown>,
+  config: SectionConfig,
+): Promise<Record<string, unknown> | null> {
+  const brokenJson = JSON.stringify(brokenData, null, 2);
+  const tool = {
+    name: `repair_${sectionText.sectionType}`,
+    description: `Return the repaired structured data for the ${sectionText.sectionType.replace(/_/g, " ")} section`,
+    inputSchema: zodToToolSchema(config.schema),
+  };
+
+  const system = `You are a JSON repair specialist. You receive garbled/malformed extracted data from a CLO document along with the original source text. Your job is to produce clean, correct structured data.
+
+Common issues:
+- Array entries with interleaved fields from different objects (e.g., tranche A's fields mixed into tranche B)
+- Missing required fields (class, designation)
+- Duplicated entries that should be merged
+
+Rules:
+- Use the ORIGINAL SOURCE TEXT as ground truth — re-extract from it if the JSON is too garbled
+- Every array entry must be a complete, self-contained object
+- Do not fabricate data — use null for fields not in the source text
+- Percentages as numbers, monetary amounts as raw numbers, dates as YYYY-MM-DD`;
+
+  const content: Array<Record<string, unknown>> = [
+    { type: "text", text: `The following extracted JSON is garbled. Please repair it using the original source text.\n\n## Garbled JSON:\n\`\`\`json\n${brokenJson}\n\`\`\`\n\n## Original source text:\n${sectionText.markdown}` },
+  ];
+
+  const label = `repair:${sectionText.sectionType}`;
+  console.log(`[section-extractor] running repair for ${sectionText.sectionType}`);
+  const result = await callAnthropicWithTool(apiKey, system, content, 16000, tool, label);
+
+  if (result.error) {
+    console.error(`[section-extractor] repair failed for ${sectionText.sectionType}: ${result.error.slice(0, 200)}`);
+    return null;
+  }
+
+  console.log(`[section-extractor] repair succeeded for ${sectionText.sectionType}`);
+  return result.data;
 }
 
 export async function extractSection(
@@ -87,9 +145,17 @@ export async function extractSection(
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: result.error };
   }
 
+  let data = result.data;
+
+  // Auto-repair garbled structured output
+  if (needsRepair(sectionText.sectionType, data)) {
+    const repaired = await repairExtraction(apiKey, sectionText, data!, config);
+    if (repaired) data = repaired;
+  }
+
   return {
     sectionType: sectionText.sectionType,
-    data: result.data,
+    data,
     truncated: result.truncated,
   };
 }

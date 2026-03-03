@@ -219,6 +219,13 @@ export function ppmCapitalStructurePrompt(): Prompt {
 CRITICAL: Extract ALL tranches from Class A through subordinated/equity notes.
 For each tranche: class, designation, principalAmount, rateType, referenceRate, spreadBps, spread, rating (fitch, sp), deferrable, maturityDate, isSubordinated.
 
+IMPORTANT — each tranche MUST be a COMPLETE object with ALL its fields. Do NOT interleave fields from different tranches. Process one tranche at a time, from Class A to Subordinated.
+
+Typical CLO tranches in order: Class A, Class B, Class C, Class D, Class E, Class F (sometimes), Subordinated Notes.
+- Class A is always the most senior (lowest spread, highest rating, AAA)
+- Subordinated Notes are always the most junior (no rating, no spread)
+- "class" = the short name (e.g., "Class A"), "designation" = the full name (e.g., "Class A Senior Secured Floating Rate Notes")
+
 Also extract deal sizing: targetParAmount, totalRatedNotes, totalSubordinatedNotes, totalDealSize, equityPctOfDeal.
 
 ${COMMON_RULES}`,
@@ -230,9 +237,17 @@ export function ppmCoverageTestsPrompt(): Prompt {
   return {
     system: `You are extracting coverage test definitions from a CLO private placement memorandum's markdown text.
 
-Extract coverage test entries: class, parValueRatio, interestCoverageRatio.
+Extract coverage test entries for EACH tranche class: class, parValueRatio (the OC test trigger level), interestCoverageRatio (the IC test trigger level).
 
-Extract reinvestment OC test: trigger, appliesDuring, diversionAmount.
+Look for these patterns:
+- "Class A/B Par Value Test" or "Class A/B Overcollateralisation Ratio Test" → class="A/B"
+- "Par Value Ratio": a percentage like "129.31%" or "120.0%"
+- "Interest Coverage Ratio" or "Interest Coverage Test": a percentage like "120.0%"
+- Tests may be described in paragraph form: "the Class A/B Par Value Ratio shall not be less than 129.31 per cent"
+
+Also look for tables with columns like: Class | OC Trigger | IC Trigger
+
+Extract reinvestment OC test: trigger level, appliesDuring (e.g., "Reinvestment Period only"), diversionAmount.
 
 ${COMMON_RULES}`,
     user: `Extract the coverage test definitions from the following markdown text.`,
@@ -283,9 +298,26 @@ export function ppmFeesPrompt(): Prompt {
   return {
     system: `You are extracting fees and account definitions from a CLO private placement memorandum's markdown text.
 
-Extract all fees: name, rate, basis, description.
+Extract ALL fees: name, rate, basis, description.
+
+Common CLO fees to look for:
+- Senior Management Fee / Senior Collateral Management Fee
+- Subordinated Management Fee / Subordinated Collateral Management Fee
+- Incentive Management Fee / Performance Fee
+- Trustee Fee
+- Administrative Expenses / Administrative Expense Cap
+- Arrangement Fee
+- Placement Fee
+- Rating Agency Fees
+- Legal/Audit Expenses
+
+Fees may be expressed as:
+- Basis points per annum on collateral balance (e.g., "0.15% per annum")
+- Fixed amounts per payment period
+- Percentage of interest/principal proceeds
 
 Extract account definitions: name, purpose.
+Common accounts: Payment Account, Collection Account, Principal Account, Interest Account, Reserve Account, Expense Account, Custody Account, Hedge Counterparty Collateral Account.
 
 ${COMMON_RULES}`,
     user: `Extract all fees and account definitions from the following markdown text.`,
@@ -302,6 +334,17 @@ CRITICAL: Extract ACTUAL DATE VALUES, not field labels.
 - If only month/year is given, use the 15th (e.g., "July 2035" -> "2035-07-15").
 
 Extract: originalIssueDate, currentIssueDate, maturityDate, nonCallPeriodEnd, reinvestmentPeriodEnd, firstPaymentDate, paymentFrequency.
+
+IMPORTANT — common aliases for these dates:
+- originalIssueDate: "Closing Date", "Original Closing Date", "Issue Date", "Date of Issuance"
+- currentIssueDate: "Refinancing Date", "Reset Date", "Reissue Date" (only if the deal was refinanced/reset)
+- maturityDate: "Stated Maturity", "Legal Final Maturity", "Scheduled Maturity Date", or found in "the Notes mature on [date]", "due [year]"
+- nonCallPeriodEnd: "Non-Call Period End Date", "Optional Redemption Date", "First Optional Redemption Date", "callable on or after [date]"
+- reinvestmentPeriodEnd: "Reinvestment Period End Date", "End of Reinvestment Period", "Reinvestment Termination Date"
+- firstPaymentDate: "First Payment Date", "First Distribution Date", "First Interest Payment Date"
+- paymentFrequency: "quarterly", "semi-annually" — look for "Payment Dates: each [frequency]"
+
+If a date appears in the tranche/notes table (e.g., maturity column), that counts as an explicit mention.
 
 ${COMMON_RULES}`,
     user: `Extract all key dates from the following markdown text.`,

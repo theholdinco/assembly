@@ -31,8 +31,6 @@ export const PPM_SECTION_TYPES = [
   "fees_and_expenses",
   "key_dates",
   "key_parties",
-  "redemption",
-  "hedging",
 ] as const;
 
 const sectionSchema = z.object({
@@ -127,7 +125,61 @@ function filterToKnownSections(map: DocumentMap): DocumentMap {
     const dropped = map.sections.filter((s) => !VALID_SECTION_TYPES.has(s.sectionType)).map((s) => s.sectionType);
     console.log(`[document-mapper] filtered out ${removed} unknown section types: ${dropped.join(", ")}`);
   }
-  return { ...map, sections: filtered };
+
+  // Deduplicate overlapping page ranges — higher-priority sections keep their pages
+  const deduplicated = deduplicatePageRanges(filtered);
+
+  return { ...map, sections: deduplicated };
+}
+
+// Priority order: higher-priority sections keep their full range, lower-priority
+// sections get their overlapping pages trimmed away.
+const SECTION_PRIORITY: Record<string, number> = {
+  capital_structure: 10,
+  key_dates: 9,
+  coverage_tests: 8,
+  portfolio_constraints: 7,
+  eligibility_criteria: 6,
+  fees_and_expenses: 5,
+  waterfall_rules: 4,
+  key_parties: 3,
+  transaction_overview: 2,
+};
+
+function deduplicatePageRanges(sections: SectionEntry[]): SectionEntry[] {
+  // Sort by priority descending — higher priority sections keep their pages
+  const sorted = [...sections].sort(
+    (a, b) => (SECTION_PRIORITY[b.sectionType] ?? 0) - (SECTION_PRIORITY[a.sectionType] ?? 0),
+  );
+
+  const claimed = new Set<number>();
+  const result: SectionEntry[] = [];
+
+  for (const section of sorted) {
+    // Find unclaimed pages in this section's range
+    const unclaimed: number[] = [];
+    for (let p = section.pageStart; p <= section.pageEnd; p++) {
+      if (!claimed.has(p)) unclaimed.push(p);
+    }
+
+    if (unclaimed.length === 0) {
+      console.log(`[document-mapper] dropped ${section.sectionType}(pp${section.pageStart}-${section.pageEnd}) — all pages claimed by higher-priority sections`);
+      continue;
+    }
+
+    // Use the contiguous range of unclaimed pages
+    const newStart = unclaimed[0];
+    const newEnd = unclaimed[unclaimed.length - 1];
+
+    if (newStart !== section.pageStart || newEnd !== section.pageEnd) {
+      console.log(`[document-mapper] trimmed ${section.sectionType}: pp${section.pageStart}-${section.pageEnd} → pp${newStart}-${newEnd}`);
+    }
+
+    for (let p = newStart; p <= newEnd; p++) claimed.add(p);
+    result.push({ ...section, pageStart: newStart, pageEnd: newEnd });
+  }
+
+  return result;
 }
 
 const CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 } as const;
