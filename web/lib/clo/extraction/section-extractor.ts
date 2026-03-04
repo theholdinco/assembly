@@ -3,6 +3,16 @@ import { callAnthropicWithTool } from "../api";
 import { zodToToolSchema } from "./schema-utils";
 import * as schemas from "./section-schemas";
 import * as prompts from "./section-prompts";
+import type { PageTableData } from "./table-extractor";
+import {
+  parseComplianceSummaryTables,
+  parseComplianceTestTables,
+  parseHoldingsTables,
+  parseConcentrationFromTests,
+  type TableParseResult,
+  type ParsedComplianceTest,
+} from "./table-parser";
+import { addAuditEntry, type ExtractionAuditLog } from "./audit-logger";
 
 export interface SectionExtractionResult {
   sectionType: string;
@@ -115,11 +125,127 @@ Rules:
   return result.data;
 }
 
+const TABLE_QUALITY_THRESHOLD = 0.7;
+
+const TABLE_ELIGIBLE_SECTIONS = new Set([
+  "compliance_summary",
+  "par_value_tests",
+  "interest_coverage_tests",
+  "asset_schedule",
+  "concentration_tables",
+]);
+
+let cachedParsedTests: ParsedComplianceTest[] | null = null;
+
+function tryTableExtraction(
+  sectionType: string,
+  tablePages: PageTableData[],
+  pageStart: number,
+  pageEnd: number,
+): TableParseResult<unknown> | null {
+  if (!TABLE_ELIGIBLE_SECTIONS.has(sectionType)) return null;
+
+  switch (sectionType) {
+    case "compliance_summary": {
+      const result = parseComplianceSummaryTables(tablePages, pageStart, pageEnd);
+      return result as TableParseResult<unknown>;
+    }
+    case "par_value_tests":
+    case "interest_coverage_tests": {
+      const result = parseComplianceTestTables(tablePages, pageStart, pageEnd);
+      if (result.data) cachedParsedTests = result.data;
+      const schemaData = result.data ? {
+        tests: result.data.map((t) => ({
+          ...t,
+          cushionPct: null,
+          cushionAmount: null,
+          consequenceIfFail: null,
+        })),
+        parValueAdjustments: [],
+        interestAmountsPerTranche: [],
+      } : null;
+      return { ...result, data: schemaData };
+    }
+    case "asset_schedule": {
+      const result = parseHoldingsTables(tablePages, pageStart, pageEnd);
+      const schemaData = result.data ? { holdings: result.data } : null;
+      return { ...result, data: schemaData };
+    }
+    case "concentration_tables": {
+      if (!cachedParsedTests) return null;
+      const result = parseConcentrationFromTests(cachedParsedTests);
+      const schemaData = result.data ? { concentrations: result.data } : null;
+      return { ...result, data: schemaData };
+    }
+    default:
+      return null;
+  }
+}
+
 export async function extractSection(
   apiKey: string,
   sectionText: SectionText,
   documentType: "compliance_report" | "ppm",
+  tablePages?: PageTableData[],
+  auditLog?: ExtractionAuditLog,
 ): Promise<SectionExtractionResult> {
+  const startTime = Date.now();
+
+  // Table-first path for compliance reports
+  if (documentType === "compliance_report" && tablePages && TABLE_ELIGIBLE_SECTIONS.has(sectionText.sectionType)) {
+    const tableResult = tryTableExtraction(
+      sectionText.sectionType,
+      tablePages,
+      sectionText.pageStart,
+      sectionText.pageEnd,
+    );
+
+    if (tableResult && tableResult.quality >= TABLE_QUALITY_THRESHOLD && tableResult.data) {
+      console.log(`[section-extractor] ${sectionText.sectionType}: TABLE extraction succeeded (quality=${tableResult.quality.toFixed(2)}, records=${tableResult.recordCount})`);
+
+      if (auditLog) {
+        addAuditEntry(auditLog, {
+          sectionType: sectionText.sectionType,
+          method: "table",
+          pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+          recordsExtracted: tableResult.recordCount,
+          fieldsPerRecord: 0,
+          qualityScore: tableResult.quality,
+          nullFieldRatio: tableResult.nullFieldRatio,
+          typeErrors: tableResult.typeErrors,
+          rawSamples: [],
+          dataQualityNotes: tableResult.notes,
+          durationMs: Date.now() - startTime,
+        });
+      }
+
+      return {
+        sectionType: sectionText.sectionType,
+        data: tableResult.data as Record<string, unknown>,
+        truncated: false,
+      };
+    }
+
+    // Table extraction failed or low quality — fall back to Claude
+    console.log(`[section-extractor] ${sectionText.sectionType}: TABLE quality too low (${tableResult?.quality.toFixed(2) ?? "null"}), falling back to Claude`);
+
+    if (auditLog) {
+      addAuditEntry(auditLog, {
+        sectionType: sectionText.sectionType,
+        method: "table+claude_fallback",
+        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+        recordsExtracted: tableResult?.recordCount ?? 0,
+        fieldsPerRecord: 0,
+        qualityScore: tableResult?.quality ?? 0,
+        nullFieldRatio: tableResult?.nullFieldRatio ?? 1,
+        typeErrors: tableResult?.typeErrors ?? [],
+        rawSamples: [],
+        dataQualityNotes: tableResult?.notes ?? ["table extraction returned null"],
+        durationMs: Date.now() - startTime,
+      });
+    }
+  }
+
   const config = getSectionConfig(sectionText.sectionType, documentType);
   if (!config) {
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: `Unknown section type: ${sectionText.sectionType}` };
@@ -153,6 +279,22 @@ export async function extractSection(
     if (repaired) data = repaired;
   }
 
+  if (auditLog) {
+    addAuditEntry(auditLog, {
+      sectionType: sectionText.sectionType,
+      method: "claude",
+      pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+      recordsExtracted: 0,
+      fieldsPerRecord: 0,
+      qualityScore: data ? 1 : 0,
+      nullFieldRatio: 0,
+      typeErrors: [],
+      rawSamples: [],
+      dataQualityNotes: [],
+      durationMs: Date.now() - startTime,
+    });
+  }
+
   return {
     sectionType: sectionText.sectionType,
     data,
@@ -165,10 +307,51 @@ export async function extractAllSections(
   sectionTexts: SectionText[],
   documentType: "compliance_report" | "ppm",
   concurrency = 3,
+  tablePages?: PageTableData[],
+  auditLog?: ExtractionAuditLog,
 ): Promise<SectionExtractionResult[]> {
+  // Reset cached tests at the start of each extraction run
+  cachedParsedTests = null;
+
   const results: SectionExtractionResult[] = [];
   const items = [...sectionTexts];
 
+  // For compliance reports with table data: extract table-eligible sections first (sequentially)
+  // so concentration_tables can use cached test results
+  if (documentType === "compliance_report" && tablePages) {
+    const tableEligible = items.filter((s) => TABLE_ELIGIBLE_SECTIONS.has(s.sectionType));
+    const claudeOnly = items.filter((s) => !TABLE_ELIGIBLE_SECTIONS.has(s.sectionType));
+
+    // Process table-eligible sections sequentially (concentration depends on tests)
+    for (const st of tableEligible) {
+      console.log(`[section-extractor] table-first: ${st.sectionType}(${st.markdown.length} chars)`);
+      const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
+      const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
+      console.log(`[section-extractor] ${st.sectionType}: ${status}`);
+      results.push(result);
+    }
+
+    // Process Claude-only sections in batches (existing parallel logic)
+    for (let i = 0; i < claudeOnly.length; i += concurrency) {
+      const batch = claudeOnly.slice(i, i + concurrency);
+      const batchNum = Math.floor(i / concurrency) + 1;
+      const totalBatches = Math.ceil(claudeOnly.length / concurrency);
+      console.log(`[section-extractor] claude batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
+      const batchResults = await Promise.all(
+        batch.map(async (st) => {
+          const result = await extractSection(apiKey, st, documentType, undefined, auditLog);
+          const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
+          console.log(`[section-extractor] ${st.sectionType}: ${status}`);
+          return result;
+        }),
+      );
+      results.push(...batchResults);
+    }
+
+    return results;
+  }
+
+  // Original batched parallel logic for PPM or when no table data
   for (let i = 0; i < items.length; i += concurrency) {
     const batch = items.slice(i, i + concurrency);
     const batchNum = Math.floor(i / concurrency) + 1;
@@ -176,7 +359,7 @@ export async function extractAllSections(
     console.log(`[section-extractor] batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
     const batchResults = await Promise.all(
       batch.map(async (st) => {
-        const result = await extractSection(apiKey, st, documentType);
+        const result = await extractSection(apiKey, st, documentType, undefined, auditLog);
         const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
         console.log(`[section-extractor] ${st.sectionType}: ${status}`);
         return result;
