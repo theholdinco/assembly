@@ -5,6 +5,7 @@ import * as schemas from "./section-schemas";
 import * as prompts from "./section-prompts";
 import type { PageTableData } from "./table-extractor";
 import {
+  parseComplianceSummaryTables,
   parseComplianceTestTables,
   parseHoldingsTables,
   parseConcentrationFromTests,
@@ -70,7 +71,6 @@ function needsRepair(sectionType: string, data: Record<string, unknown> | null):
   if (sectionType === "capital_structure") {
     const cap = data.capitalStructure;
     if (!Array.isArray(cap) || cap.length === 0) return false;
-    // Check if any tranche is missing the required "class" field
     const broken = cap.filter((t: Record<string, unknown>) => !t.class || !t.designation);
     if (broken.length > 0) {
       console.log(`[section-extractor] capital_structure has ${broken.length}/${cap.length} tranches with missing class/designation — scheduling repair`);
@@ -124,11 +124,13 @@ Rules:
   return result.data;
 }
 
-const TABLE_QUALITY_THRESHOLD = 0.7;
+// ---------------------------------------------------------------------------
+// Table extraction + merge logic
+// ---------------------------------------------------------------------------
 
-// compliance_summary excluded: Claude handles capital structure + pool metrics well;
-// pdfplumber tranche extraction is fragile with merged-cell BNY Mellon tables.
+// Sections where we run both table + Claude and merge results
 const TABLE_ELIGIBLE_SECTIONS = new Set([
+  "compliance_summary",
   "par_value_tests",
   "interest_coverage_tests",
   "asset_schedule",
@@ -146,6 +148,10 @@ function tryTableExtraction(
   if (!TABLE_ELIGIBLE_SECTIONS.has(sectionType)) return null;
 
   switch (sectionType) {
+    case "compliance_summary": {
+      const result = parseComplianceSummaryTables(tablePages, pageStart, pageEnd);
+      return result as TableParseResult<unknown>;
+    }
     case "par_value_tests":
     case "interest_coverage_tests": {
       const result = parseComplianceTestTables(tablePages, pageStart, pageEnd);
@@ -178,6 +184,47 @@ function tryTableExtraction(
   }
 }
 
+/**
+ * Merge table-extracted data onto Claude-extracted data.
+ * Table data = ground truth for numbers/dates (direct from pdfplumber, no hallucination).
+ * Claude data = better for text fields, classifications, and complex nested structures.
+ */
+function mergeExtractionResults(
+  tableData: Record<string, unknown>,
+  claudeData: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...claudeData };
+
+  for (const [key, tableValue] of Object.entries(tableData)) {
+    if (tableValue == null || tableValue === "") continue;
+    // dealDates is a sidecar for date reconciliation, not part of the schema
+    if (key === "dealDates") continue;
+
+    const claudeValue = merged[key];
+
+    if (Array.isArray(tableValue)) {
+      // Use whichever array extracted more items (more complete coverage)
+      if (!Array.isArray(claudeValue) || tableValue.length > claudeValue.length) {
+        merged[key] = tableValue;
+      }
+    } else if (typeof tableValue === "number") {
+      // Table numbers are precise — prefer over Claude's potentially hallucinated values
+      merged[key] = tableValue;
+    } else if (typeof tableValue === "string") {
+      // For dates and identifiers, prefer table if Claude has nothing
+      if (claudeValue == null || claudeValue === "" || claudeValue === "null") {
+        merged[key] = tableValue;
+      }
+    }
+  }
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// Main extraction
+// ---------------------------------------------------------------------------
+
 export async function extractSection(
   apiKey: string,
   sectionText: SectionText,
@@ -187,61 +234,36 @@ export async function extractSection(
 ): Promise<SectionExtractionResult> {
   const startTime = Date.now();
 
-  // Table-first path for compliance reports
+  // Run table extraction (instant, no API call) for eligible compliance sections
+  let tableResult: TableParseResult<unknown> | null = null;
   if (documentType === "compliance_report" && tablePages && TABLE_ELIGIBLE_SECTIONS.has(sectionText.sectionType)) {
-    const tableResult = tryTableExtraction(
-      sectionText.sectionType,
-      tablePages,
-      sectionText.pageStart,
-      sectionText.pageEnd,
-    );
-
-    if (tableResult && tableResult.quality >= TABLE_QUALITY_THRESHOLD && tableResult.data) {
-      console.log(`[section-extractor] ${sectionText.sectionType}: TABLE extraction succeeded (quality=${tableResult.quality.toFixed(2)}, records=${tableResult.recordCount})`);
-
-      if (auditLog) {
-        addAuditEntry(auditLog, {
-          sectionType: sectionText.sectionType,
-          method: "table",
-          pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-          recordsExtracted: tableResult.recordCount,
-          fieldsPerRecord: 0,
-          qualityScore: tableResult.quality,
-          nullFieldRatio: tableResult.nullFieldRatio,
-          typeErrors: tableResult.typeErrors,
-          rawSamples: [],
-          dataQualityNotes: tableResult.notes,
-          durationMs: Date.now() - startTime,
-        });
-      }
-
-      return {
-        sectionType: sectionText.sectionType,
-        data: tableResult.data as Record<string, unknown>,
-        truncated: false,
-      };
-    }
-
-    // Table extraction failed or low quality — fall back to Claude
-    console.log(`[section-extractor] ${sectionText.sectionType}: TABLE quality too low (${tableResult?.quality.toFixed(2) ?? "null"}), falling back to Claude`);
-
-    if (auditLog) {
-      addAuditEntry(auditLog, {
-        sectionType: sectionText.sectionType,
-        method: "table+claude_fallback",
-        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-        recordsExtracted: tableResult?.recordCount ?? 0,
-        fieldsPerRecord: 0,
-        qualityScore: tableResult?.quality ?? 0,
-        nullFieldRatio: tableResult?.nullFieldRatio ?? 1,
-        typeErrors: tableResult?.typeErrors ?? [],
-        rawSamples: [],
-        dataQualityNotes: tableResult?.notes ?? ["table extraction returned null"],
-        durationMs: Date.now() - startTime,
-      });
+    tableResult = tryTableExtraction(sectionText.sectionType, tablePages, sectionText.pageStart, sectionText.pageEnd);
+    if (tableResult) {
+      console.log(`[section-extractor] ${sectionText.sectionType}: table extraction got ${tableResult.recordCount} records (quality=${tableResult.quality.toFixed(2)})`);
     }
   }
 
+  // concentration_tables is derived from cached tests — no Claude call needed
+  if (sectionText.sectionType === "concentration_tables" && tableResult?.data && tableResult.quality > 0) {
+    if (auditLog) {
+      addAuditEntry(auditLog, {
+        sectionType: sectionText.sectionType,
+        method: "table",
+        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+        recordsExtracted: tableResult.recordCount,
+        fieldsPerRecord: 0,
+        qualityScore: tableResult.quality,
+        nullFieldRatio: tableResult.nullFieldRatio,
+        typeErrors: tableResult.typeErrors,
+        rawSamples: [],
+        dataQualityNotes: tableResult.notes,
+        durationMs: Date.now() - startTime,
+      });
+    }
+    return { sectionType: sectionText.sectionType, data: tableResult.data as Record<string, unknown>, truncated: false };
+  }
+
+  // Always run Claude extraction
   const config = getSectionConfig(sectionText.sectionType, documentType);
   if (!config) {
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: `Unknown section type: ${sectionText.sectionType}` };
@@ -264,6 +286,28 @@ export async function extractSection(
 
   if (result.error) {
     console.error(`[section-extractor] ${sectionText.sectionType}: ${result.error.slice(0, 200)}`);
+
+    // If Claude failed but table succeeded, use table data alone
+    if (tableResult?.data) {
+      console.log(`[section-extractor] ${sectionText.sectionType}: Claude failed, using table data only`);
+      if (auditLog) {
+        addAuditEntry(auditLog, {
+          sectionType: sectionText.sectionType,
+          method: "table",
+          pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+          recordsExtracted: tableResult.recordCount,
+          fieldsPerRecord: 0,
+          qualityScore: tableResult.quality,
+          nullFieldRatio: tableResult.nullFieldRatio,
+          typeErrors: tableResult.typeErrors,
+          rawSamples: [],
+          dataQualityNotes: [...tableResult.notes, `Claude failed: ${result.error.slice(0, 100)}`],
+          durationMs: Date.now() - startTime,
+        });
+      }
+      return { sectionType: sectionText.sectionType, data: tableResult.data as Record<string, unknown>, truncated: false };
+    }
+
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: result.error };
   }
 
@@ -275,20 +319,44 @@ export async function extractSection(
     if (repaired) data = repaired;
   }
 
-  if (auditLog) {
-    addAuditEntry(auditLog, {
-      sectionType: sectionText.sectionType,
-      method: "claude",
-      pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-      recordsExtracted: 0,
-      fieldsPerRecord: 0,
-      qualityScore: data ? 1 : 0,
-      nullFieldRatio: 0,
-      typeErrors: [],
-      rawSamples: [],
-      dataQualityNotes: [],
-      durationMs: Date.now() - startTime,
-    });
+  // Merge: overlay table-extracted values onto Claude's result
+  if (tableResult?.data && data) {
+    const before = JSON.stringify(data);
+    data = mergeExtractionResults(tableResult.data as Record<string, unknown>, data);
+    const changed = JSON.stringify(data) !== before;
+    console.log(`[section-extractor] ${sectionText.sectionType}: merged table+claude${changed ? " (table improved some fields)" : " (no changes)"}`);
+
+    if (auditLog) {
+      addAuditEntry(auditLog, {
+        sectionType: sectionText.sectionType,
+        method: "table+claude_merged",
+        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+        recordsExtracted: tableResult.recordCount,
+        fieldsPerRecord: 0,
+        qualityScore: tableResult.quality,
+        nullFieldRatio: tableResult.nullFieldRatio,
+        typeErrors: tableResult.typeErrors,
+        rawSamples: [],
+        dataQualityNotes: tableResult.notes,
+        durationMs: Date.now() - startTime,
+      });
+    }
+  } else {
+    if (auditLog) {
+      addAuditEntry(auditLog, {
+        sectionType: sectionText.sectionType,
+        method: "claude",
+        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
+        recordsExtracted: 0,
+        fieldsPerRecord: 0,
+        qualityScore: data ? 1 : 0,
+        nullFieldRatio: 0,
+        typeErrors: [],
+        rawSamples: [],
+        dataQualityNotes: [],
+        durationMs: Date.now() - startTime,
+      });
+    }
   }
 
   return {
@@ -312,30 +380,46 @@ export async function extractAllSections(
   const results: SectionExtractionResult[] = [];
   const items = [...sectionTexts];
 
-  // For compliance reports with table data: extract table-eligible sections first (sequentially)
-  // so concentration_tables can use cached test results
+  // For compliance with table data: process test sections first (sequentially)
+  // so concentration_tables can use cached results, then everything else in parallel
   if (documentType === "compliance_report" && tablePages) {
-    const tableEligible = items.filter((s) => TABLE_ELIGIBLE_SECTIONS.has(s.sectionType));
-    const claudeOnly = items.filter((s) => !TABLE_ELIGIBLE_SECTIONS.has(s.sectionType));
+    // Sections that must run first (tests populate cache for concentrations)
+    const testSections = items.filter((s) =>
+      s.sectionType === "par_value_tests" || s.sectionType === "interest_coverage_tests",
+    );
+    // Concentration depends on cached tests
+    const concentrationSection = items.filter((s) => s.sectionType === "concentration_tables");
+    // Everything else can run in parallel
+    const rest = items.filter((s) =>
+      s.sectionType !== "par_value_tests" &&
+      s.sectionType !== "interest_coverage_tests" &&
+      s.sectionType !== "concentration_tables",
+    );
 
-    // Process table-eligible sections sequentially (concentration depends on tests)
-    for (const st of tableEligible) {
-      console.log(`[section-extractor] table-first: ${st.sectionType}(${st.markdown.length} chars)`);
+    // Phase A: test sections sequentially (populates cachedParsedTests)
+    for (const st of testSections) {
+      console.log(`[section-extractor] table+claude merge: ${st.sectionType}(${st.markdown.length} chars)`);
       const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
       const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
       console.log(`[section-extractor] ${st.sectionType}: ${status}`);
       results.push(result);
     }
 
-    // Process Claude-only sections in batches (existing parallel logic)
-    for (let i = 0; i < claudeOnly.length; i += concurrency) {
-      const batch = claudeOnly.slice(i, i + concurrency);
+    // Phase B: concentration (uses cached tests, no Claude call)
+    for (const st of concentrationSection) {
+      const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
+      results.push(result);
+    }
+
+    // Phase C: all other sections in parallel batches
+    for (let i = 0; i < rest.length; i += concurrency) {
+      const batch = rest.slice(i, i + concurrency);
       const batchNum = Math.floor(i / concurrency) + 1;
-      const totalBatches = Math.ceil(claudeOnly.length / concurrency);
-      console.log(`[section-extractor] claude batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
+      const totalBatches = Math.ceil(rest.length / concurrency);
+      console.log(`[section-extractor] batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
       const batchResults = await Promise.all(
         batch.map(async (st) => {
-          const result = await extractSection(apiKey, st, documentType, undefined, auditLog);
+          const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
           const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
           console.log(`[section-extractor] ${st.sectionType}: ${status}`);
           return result;
