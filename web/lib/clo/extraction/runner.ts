@@ -1,6 +1,6 @@
 import { query } from "../../db";
 import type { CloDocument } from "../types";
-import { callAnthropicChunkedWithTool, normalizeClassName } from "../api";
+import { callAnthropicWithTool, callAnthropicChunkedWithTool, normalizeClassName } from "../api";
 import { pass1Schema, pass2Schema, pass3Schema, pass4Schema, pass5Schema } from "./schemas";
 import { pass1Prompt, pass2Prompt, pass3Prompt, pass4Prompt, pass5Prompt, pass2RepairPrompt, passContinuationPrompt } from "./prompts";
 import { normalizePass1, normalizePass2, normalizePass3, normalizePass4, normalizePass5 } from "./normalizer";
@@ -103,6 +103,36 @@ async function getOrCreateDeal(profileId: string): Promise<string> {
   return rows[0].id;
 }
 
+const TEXT_CHUNK_PAGES = 50; // pages per chunk when splitting extracted text
+const TEXT_CHUNK_OVERLAP = 5; // overlap pages between chunks for context continuity
+
+function splitTextIntoPageChunks(
+  extractedText: string,
+  pagesPerChunk: number = TEXT_CHUNK_PAGES,
+  overlap: number = TEXT_CHUNK_OVERLAP,
+): string[] {
+  // Split on page markers: "--- Page N ---"
+  const pagePattern = /--- Page \d+ ---/g;
+  const markers: { index: number; marker: string }[] = [];
+  let match;
+  while ((match = pagePattern.exec(extractedText)) !== null) {
+    markers.push({ index: match.index, marker: match[0] });
+  }
+
+  if (markers.length <= pagesPerChunk) return [extractedText];
+
+  const chunks: string[] = [];
+  for (let i = 0; i < markers.length; i += pagesPerChunk - overlap) {
+    const startIdx = markers[i].index;
+    const endMarkerIdx = Math.min(i + pagesPerChunk, markers.length);
+    const endIdx = endMarkerIdx < markers.length ? markers[endMarkerIdx].index : extractedText.length;
+    chunks.push(extractedText.slice(startIdx, endIdx).trim());
+    if (endMarkerIdx >= markers.length) break;
+  }
+
+  return chunks;
+}
+
 async function callClaudeStructured(
   apiKey: string,
   system: string,
@@ -122,17 +152,28 @@ async function callClaudeStructured(
     inputSchema,
   };
 
-  // If pre-extracted text is available, use text content blocks instead of PDF documents
-  const docsToSend = extractedText
-    ? [{ name: "extracted-text", type: "text/plain", size: extractedText.length, base64: "" } as CloDocument]
-    : documents;
-  const userTextToSend = extractedText
-    ? `${userText}\n\n--- DOCUMENT TEXT ---\n${extractedText}`
-    : userText;
+  if (extractedText) {
+    // Always use text-based extraction when pdfplumber text is available.
+    // Split into page chunks if needed to avoid token limits.
+    const chunks = splitTextIntoPageChunks(extractedText);
 
-  const chunked = extractedText
-    ? await callAnthropicChunkedWithTool(apiKey, system, [], userTextToSend, maxTokens, tool)
-    : await callAnthropicChunkedWithTool(apiKey, system, docsToSend, userText, maxTokens, tool);
+    if (chunks.length === 1) {
+      const fullUserText = `${userText}\n\n--- DOCUMENT TEXT ---\n${extractedText}`;
+      const content = [{ type: "text", text: fullUserText }];
+      const result = await callAnthropicWithTool(apiKey, system, content, maxTokens, tool, toolName);
+      if (result.error?.includes("prompt is too long")) {
+        // Text too large for single chunk — re-split with smaller chunks
+        return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(TEXT_CHUNK_PAGES / 2));
+      }
+      if (result.error) return { data: null, truncated: false, error: result.error, status: result.status };
+      return { data: result.data, truncated: result.truncated };
+    }
+
+    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, TEXT_CHUNK_PAGES);
+  }
+
+  // Fallback: no extracted text available, use PDF document chunking
+  const chunked = await callAnthropicChunkedWithTool(apiKey, system, documents, userText, maxTokens, tool);
 
   if (chunked.error) {
     return { data: null, truncated: false, error: chunked.error, status: chunked.status };
@@ -142,9 +183,59 @@ async function callClaudeStructured(
     return { data: chunked.results[0].data, truncated: chunked.results[0].truncated };
   }
 
-  // Multi-chunk: merge structured results
+  return mergeChunkResults(chunked.results);
+}
+
+async function callClaudeStructuredTextChunked(
+  apiKey: string,
+  system: string,
+  userText: string,
+  maxTokens: number,
+  tool: { name: string; description: string; inputSchema: Record<string, unknown> },
+  extractedText: string,
+  pagesPerChunk: number,
+): Promise<{ data: Record<string, unknown> | null; truncated: boolean; error?: string; status?: number }> {
+  const chunks = splitTextIntoPageChunks(extractedText, pagesPerChunk);
+  console.log(`[callClaudeStructured] Splitting text into ${chunks.length} chunks (${pagesPerChunk} pages each, ${TEXT_CHUNK_OVERLAP} overlap)`);
+
+  const chunkResults = await Promise.all(
+    chunks.map(async (chunk, i) => {
+      const chunkLabel = `pages chunk ${i + 1}/${chunks.length}`;
+      const chunkUserText = chunks.length > 1
+        ? `[NOTE: This document has been split due to size. You are viewing ${chunkLabel}. Extract all information from these pages.]\n\n${userText}\n\n--- DOCUMENT TEXT ---\n${chunk}`
+        : `${userText}\n\n--- DOCUMENT TEXT ---\n${chunk}`;
+      const content = [{ type: "text", text: chunkUserText }];
+      const result = await callAnthropicWithTool(apiKey, system, content, maxTokens, tool, `${tool.name}_chunk${i + 1}`);
+      return { ...result, chunkLabel };
+    }),
+  );
+
+  const promptTooLong = chunkResults.some((r) => r.error?.includes("prompt is too long"));
+  if (promptTooLong && pagesPerChunk > 10) {
+    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(pagesPerChunk / 2));
+  }
+
+  const firstError = chunkResults.find((r) => r.error);
+  if (firstError && chunkResults.every((r) => r.error)) {
+    return { data: null, truncated: false, error: firstError.error, status: firstError.status };
+  }
+
+  const validResults = chunkResults.filter((r) => !r.error && r.data);
+  if (validResults.length === 0) {
+    return { data: null, truncated: false, error: firstError?.error };
+  }
+  if (validResults.length === 1) {
+    return { data: validResults[0].data, truncated: validResults[0].truncated };
+  }
+
+  return mergeChunkResults(validResults);
+}
+
+function mergeChunkResults(
+  results: Array<{ data: Record<string, unknown> | null; truncated: boolean }>,
+): { data: Record<string, unknown> | null; truncated: boolean } {
   let merged: Record<string, unknown> = {};
-  for (const result of chunked.results) {
+  for (const result of results) {
     if (!result.data) continue;
     if (Object.keys(merged).length === 0) {
       merged = result.data;
@@ -161,8 +252,8 @@ async function callClaudeStructured(
     }
   }
 
-  const anyTruncated = chunked.results.some((r) => r.truncated);
-  return { data: merged, truncated: anyTruncated };
+  const anyTruncated = results.some((r) => r.truncated);
+  return { data: Object.keys(merged).length > 0 ? merged : null, truncated: anyTruncated };
 }
 
 interface PassResult {

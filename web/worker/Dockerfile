@@ -1,9 +1,6 @@
 FROM node:20-slim
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pip \
- && pip install --no-cache-dir --break-system-packages pdfplumber \
- && apt-get purge -y python3-pip \
- && apt-get autoremove -y \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+ && python3 -m pip install --no-cache-dir --break-system-packages pdfplumber \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
