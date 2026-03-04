@@ -2,9 +2,10 @@ type Prompt = { system: string; user: string };
 
 const COMMON_RULES = `Rules:
 - Extract ONLY explicitly stated values. Use null for missing fields. Never fabricate data.
-- Percentages as numbers (e.g., 5.2 not "5.2%").
+- Percentages as numbers (e.g., 5.2 not "5.2%"). PPMs often write "per cent." or "per cent" instead of "%".
 - Monetary amounts as raw numbers without currency symbols.
-- Dates in YYYY-MM-DD format.`;
+- Dates in YYYY-MM-DD format. Compliance reports use DD-MMM-YYYY (e.g., "26-Apr-2024"). PPMs use "DD Month YYYY" (e.g., "15 April 2038").
+- PPM defined terms use smart/curly quotes (\u201c\u201d) not straight quotes. Both "Term" and \u201cTerm\u201d refer to the same defined term.`;
 
 // ---------------------------------------------------------------------------
 // Compliance Report Section Prompts
@@ -16,17 +17,31 @@ export function complianceSummaryPrompt(): Prompt {
 
 Extract:
 - Report date, deal name, trustee, collateral manager
+- Key deal dates: closing date, stated maturity, next payment date, collection period end, reinvestment period end, non-call period end
 - Tranche table: class name, principal amount, spread, all-in rate, current balance, rating, coupon rate
 - Pool summary metrics: total par, number of assets, number of obligors, WAC spread, WARF, diversity score, WAL, WA recovery rate
 - Percentage breakdowns: fixed rate, floating rate, cov-lite, second lien, defaulted, CCC and below
 
 REPORT DATE — CRITICAL:
 - Look for "Report Date:", "Determination Date:", "As of:", "Payment Date:".
-- Convert to YYYY-MM-DD. NEVER return "UNKNOWN" or a placeholder — use null only as a last resort.
+- Compliance reports use DD-MMM-YYYY format (e.g., "26-Apr-2024"). Convert to YYYY-MM-DD.
+- NEVER return "UNKNOWN" or a placeholder — use null only as a last resort.
+
+KEY DATES:
+- The compliance summary page typically contains Deal Summary mini-tables with key-value pairs like:
+  "Closing Date: 30-Nov-2022", "Stated Maturity: 15-Jul-2035", "Next Payment Date: 15-Oct-2024",
+  "Next Collection Period End Date: 02-Oct-2024", "Reinvestment Period End: 14-Jul-2027".
+- Extract ALL of these into the dedicated date fields. These are critical for deal modeling.
 
 TRANCHE TABLE:
-- Extract ALL tranches from the summary table — from Class A through subordinated notes.
-- Each tranche needs: className, principalAmount, spread, allInRate, currentBalance, rating, couponRate.
+- BNY Mellon compliance reports have a 14-column tranche table:
+  Tranche Name | Original Balance | Current Balance | All-in Rate | Spread | Interest Amount | CCY | Fitch Original | Fitch Current | Fitch CW | S&P Original | S&P Current | S&P CW | Maturity Date
+- Tranche naming follows: "Class [LETTER] Senior Secured Floating Rate [Loan|Notes] due [YEAR]"
+- Class A may be split into "Loan" and "Notes" sub-tranches.
+- Class B may be split into "B-1" (floating) and "B-2" (fixed).
+- Subordinated Notes are always last, with "N/A" for ratings and "Residual" for trigger levels.
+- "All in Rate" = EURIBOR fixing + Spread. Spreads are shown as percentages (e.g., 2.20000%), not basis points.
+- Extract ALL tranches from Class A through subordinated notes.
 
 ${COMMON_RULES}`,
     user: `Extract the compliance summary section from the following markdown text.`,
@@ -40,6 +55,15 @@ export function parValueTestsPrompt(): Prompt {
 For EACH test extract: testName, testClass, numerator, denominator, actualValue, triggerLevel, cushionPct, isPassing, consequenceIfFail.
 
 CRITICAL: Every test has BOTH actualValue AND triggerLevel. Look for "Trigger", "Limit", "Threshold", "Required", "Min", "Max" columns. If "Actual: 129.03, Required: 120.0", then actualValue=129.03 and triggerLevel=120.0.
+
+BNY MELLON TABLE FORMAT:
+- The compliance test table uses a 9-column format:
+  Test Name | Numerator | Denominator | Prior Outcome | Outcome | Requirement | [empty] | Result | [empty]
+- Columns 6 and 8 are ALWAYS empty — they are BNY Mellon template artifacts. Skip them.
+- The "Result" column (index 7) contains "Passed" or "Failed".
+- The "Requirement" column uses operators: ">= X%", "<= X%", "<= X.XX" (for WARF, no %).
+- "N/A" in the requirement column means informational metric, not a binding test.
+- Percentages have 5 decimal places in compliance reports (e.g., "117.85%").
 
 Par value adjustments: Extract haircuts for CCC excess, defaulted, discount obligations, etc. Each with testName, adjustmentType, description, grossAmount, adjustmentAmount, netAmount.
 
@@ -62,6 +86,12 @@ Also extract interest amounts per tranche from the IC test denominator breakdown
 
 CRITICAL: Every test has BOTH actualValue AND triggerLevel. Look for "Trigger", "Limit", "Threshold", "Required", "Min", "Max" columns.
 
+BNY MELLON TABLE FORMAT:
+- Same 9-column format as par value tests:
+  Test Name | Numerator | Denominator | Prior Outcome | Outcome | Requirement | [empty] | Result | [empty]
+- Columns 6 and 8 are ALWAYS empty — BNY Mellon template artifacts. Skip them.
+- IC test detail pages also show "Amounts Payable Priority of Payments" breakdowns with actual fee amounts.
+
 Normalize class names: "Class A/B", "Classes A and B" -> use "A/B".
 
 DEDUPLICATION: Same test may appear in multiple places. Extract each unique test ONLY ONCE with the most complete data.
@@ -79,9 +109,17 @@ COMPLETENESS — CRITICAL:
 - CLO portfolios have 100-250+ positions. You MUST extract EVERY SINGLE ONE.
 - Do NOT stop partway through. Extract from A through Z.
 
-For each holding extract: obligorName, facilityName, isin, lxid, assetType, currency, country, industryCode, industryDescription, moodysIndustry, spIndustry, ratings (moodysRating, spRating, fitchRating, compositeRating, ratingFactor), parBalance, principalBalance, marketValue, purchasePrice, currentPrice, accruedInterest, referenceRate, indexRate, spreadBps, allInRate, floorRate, recoveryRateMoodys, recoveryRateSp, remainingLifeYears, warfContribution, diversityScoreGroup, acquisitionDate, maturityDate, settlementStatus, boolean flags (isCovLite, isRevolving, isDelayedDraw, isDefaulted, isPik, isFixedRate, isDiscountObligation, isLongDated).
+BNY MELLON TABLE STRUCTURE:
+- The holdings are split across three "Asset Information" sections with different column counts:
+  Asset Info I (loans): 9 cols — Name, SecID, Type, MarketPrice, Principal, Par, Accrued, Seniority, Maturity
+  Asset Info II (bonds): 10 cols — adds Currency, LGD%, Country, Lien
+  Asset Info III (equity/other): 15 cols — adds Internal ID, Bloomberg ID, Ratings
+- Security IDs follow patterns: LX###### for loans, XS########## for bonds (ISIN).
+- All amounts in EUR with comma thousands separator, dot decimal: "3,462,041.94".
+- Dates in DD-MMM-YYYY format: "16-Feb-2028".
+- Deduplicate rows using composite key (obligorName, securityId) — multi-page tables may repeat headers.
 
-MULTI-TABLE: The markdown may contain a unified table from Phase 2 transcription. Extract all rows regardless of source table.
+For each holding extract: obligorName, facilityName, isin, lxid, assetType, currency, country, industryCode, industryDescription, moodysIndustry, spIndustry, ratings (moodysRating, spRating, fitchRating, compositeRating, ratingFactor), parBalance, principalBalance, marketValue, purchasePrice, currentPrice, accruedInterest, referenceRate, indexRate, spreadBps, allInRate, floorRate, recoveryRateMoodys, recoveryRateSp, remainingLifeYears, warfContribution, diversityScoreGroup, acquisitionDate, maturityDate, settlementStatus, boolean flags (isCovLite, isRevolving, isDelayedDraw, isDefaulted, isPik, isFixedRate, isDiscountObligation, isLongDated).
 
 - Spreads in basis points as numbers (375 not "L+375")
 - Prices as numbers (99.5)
@@ -102,15 +140,22 @@ Extract EVERY concentration/distribution bucket. Types: INDUSTRY, COUNTRY, SINGL
 
 For each bucket: concentrationType, bucketName, actualValue, actualPct, limitValue, limitPct, isPassing, excessAmount, isHaircutApplied, haircutAmount, obligorCount, assetCount.
 
-Include ALL rows from:
+BNY MELLON COMPLIANCE TEST FORMAT:
+- Concentration limits are embedded within the compliance tests (typically pages 3-5), not in separate tables.
+- They appear as Portfolio Profile Tests with alphabetical lettering:
+  (a) through (s): asset type, rating, maturity, country limits, obligor limits
+  (t)(i) through (t)(v): Fitch Industry concentration
+  (u)(i) through (u)(v): S&P Industry concentration
+  (aa) through (dd): Counterparty credit exposure
+- Same 9-column format: Test Name | Numerator | Denominator | Prior Outcome | Outcome | Requirement | [empty] | Result | [empty]
+- The "Requirement" column contains the limit (e.g., "<= 10.00%", ">= 27.00").
+- Extract the test letter prefix as part of the bucketName for traceability.
+
+Also include ALL rows from any standalone distribution tables:
 - Industry distribution tables
 - Country distribution tables
-- Obligor concentration / top exposures
 - Rating distribution tables
-- Maturity profile tables
-- Spread distribution tables
-- Asset type distribution tables
-- Currency distribution tables
+- Maturity/spread/asset type tables
 
 ${COMMON_RULES}`,
     user: `Extract all concentration and distribution data from the following markdown text.`,
@@ -139,6 +184,12 @@ ${COMMON_RULES}`,
 export function tradingActivityPrompt(): Prompt {
   return {
     system: `You are extracting trading activity from a CLO trustee report's markdown text.
+
+BNY MELLON FORMAT:
+- Purchases and Sales are on a dedicated page (typically around page 29).
+- "Purchase" and "Sale" are section headers; trades are listed under each.
+- Following pages may contain Principal Paydowns/Borrowings and Hedge Transactions.
+- Trade lines contain: Description, Security ID, Trade Date (DD-MMM-YYYY), Settlement Date, Currency, Par Amount, Settlement Price.
 
 Extract ALL trades: purchases, sales, paydowns, prepayments, defaults, recoveries.
 For each: tradeType (PURCHASE/SALE/PAYDOWN/PREPAYMENT/DEFAULT_RECOVERY/CREDIT_RISK_SALE/DISCRETIONARY_SALE/SUBSTITUTION/AMENDED/RESTRUCTURED), obligorName, facilityName, tradeDate, settlementDate, parAmount, settlementPrice, settlementAmount, realizedGainLoss, currency, isCreditRiskSale, isCreditImproved, isDiscretionary.
@@ -169,6 +220,11 @@ ${COMMON_RULES}`,
 export function accountBalancesPrompt(): Prompt {
   return {
     system: `You are extracting account balances from a CLO trustee report's markdown text.
+
+BNY MELLON FORMAT:
+- Account names are prefixed with the deal name (e.g., "ARES EUROPEAN CLO XVI").
+- Account type suffixes are standard BNY Mellon naming: "CUSTODY", "PAYMENT CSH", "SH CPTL CSH", "UNFUNDED CSH".
+- Typically on pages 8-9 of the compliance report.
 
 Extract ALL account balances.
 For each: accountName, accountType (COLLECTION/PAYMENT/RESERVE/PRINCIPAL/INTEREST/EXPENSE/HEDGE/CUSTODY), currency, balanceAmount, requiredBalance, excessDeficit.
@@ -207,7 +263,14 @@ export function ppmTransactionOverviewPrompt(): Prompt {
 
 Extract deal identity: dealName, issuerLegalName, collateralManager, jurisdiction, entityType, governingLaw, currency, listingExchange.
 
-The Collateral Manager is the entity managing the CLO's loan portfolio. Look for "The Collateral Manager is [name]", "[name] (as Collateral Manager)", or a "Collateral Manager" row in the transaction summary table.
+CLO PPM STRUCTURE:
+- The transaction overview is typically in the first few pages after front matter/TOC.
+- Key parties are often listed in a dots-leader format: "Role........ Entity." (variable number of dots).
+  e.g., "Collateral Manager..................................... Ares Management Limited."
+  "Trustee........................................................ BNY Mellon Corporate Trustee Services Limited."
+- The issuer legal name includes the entity type suffix (e.g., "DAC" = Designated Activity Company for Irish entities).
+- European CLOs are typically Irish DACs governed by Irish law, listed on Euronext Dublin.
+- The Collateral Manager is the entity managing the CLO's loan portfolio. Look for "The Collateral Manager is [name]", "[name] (as Collateral Manager)", or a dots-leader row.
 
 ${COMMON_RULES}`,
     user: `Extract the transaction overview from the following markdown text.`,
@@ -226,10 +289,21 @@ principalAmount should include the full string with currency, e.g., "EUR 248,000
 
 IMPORTANT — each tranche MUST be a COMPLETE object with ALL its fields. Do NOT interleave fields from different tranches. Process one tranche at a time, from Class A to Subordinated.
 
-Typical CLO tranches in order: Class A, Class B, Class C, Class D, Class E, Class F (sometimes), Subordinated Notes.
-- Class A is always the most senior (lowest spread, highest rating, AAA)
-- Subordinated Notes are always the most junior (no rating, no spread)
-- "class" = the short name (e.g., "Class A"), "designation" = the full name (e.g., "Class A Senior Secured Floating Rate Notes")
+CLO TRANCHE PATTERNS:
+- Typical order: Class X (tiny, amortises first), Class A, Class B-1 (floating), Class B-2 (fixed), Class C, Class D, Class E, Class F (sometimes), Subordinated Notes.
+- Class A is always the most senior (lowest spread, highest rating, AAA). It may be split into "Loan" and "Notes" sub-tranches with same economics.
+- Class B may be split into "B-1" (floating rate) and "B-2" (fixed rate).
+- Subordinated Notes are always last (no rating, no spread, no coupon — returns are residual).
+- Designation follows: "Class [LETTER] Senior Secured Floating Rate [Loan|Notes] due [YEAR]"
+- "class" = the short name (e.g., "Class A"), "designation" = the full name
+- All amounts in EUR with comma thousands separator.
+- For European CLOs, reference rate is "3-month EURIBOR".
+
+PPM CAPITAL STRUCTURE FORMAT:
+- IMPORTANT: In PPMs, the capital structure on the overview pages is often rendered as FORMATTED TEXT, not a PDF table. extract_tables() may return nothing.
+- Each tranche typically spans 2-3 lines of text with: class name, principal amount, rate type, spread, rating.
+- Parse the multi-line text blocks carefully — do not expect a clean tabular structure.
+- Spreads in PPMs are written as "per cent." not "%" (e.g., "1.50 per cent." = 150 bps).
 
 Also extract deal sizing: targetParAmount, totalRatedNotes, totalSubordinatedNotes, totalDealSize, equityPctOfDeal.
 
@@ -244,13 +318,14 @@ export function ppmCoverageTestsPrompt(): Prompt {
 
 Extract coverage test entries for EACH tranche class: class, parValueRatio (the OC test trigger level), interestCoverageRatio (the IC test trigger level).
 
-Look for these patterns:
-- "Class A/B Par Value Test" or "Class A/B Overcollateralisation Ratio Test" → class="A/B"
-- "Par Value Ratio": a percentage like "129.31%" or "120.0%"
-- "Interest Coverage Ratio" or "Interest Coverage Test": a percentage like "120.0%"
+PPM COVERAGE TEST FORMAT:
+- Tests may be in the Definitions section as defined terms (with smart quotes \u201c\u201d):
+  \u201cClass A/B Par Value Test\u201d means... "shall not be less than 129.31 per cent."
+- Percentages in PPMs are written as "per cent." or "per cent" NOT "%".
+- Look for: "Par Value Ratio", "Overcollateralisation Ratio", "Interest Coverage Ratio".
 - Tests may be described in paragraph form: "the Class A/B Par Value Ratio shall not be less than 129.31 per cent"
-
-Also look for tables with columns like: Class | OC Trigger | IC Trigger
+- Also look for tables with columns like: Class | OC Trigger | IC Trigger
+- NOTE: PPM trigger levels may differ from compliance report values if the deal was refinanced. Extract the PPM values as stated.
 
 Extract reinvestment OC test: trigger level, appliesDuring (e.g., "Reinvestment Period only"), diversionAmount.
 
@@ -262,6 +337,12 @@ ${COMMON_RULES}`,
 export function ppmEligibilityCriteriaPrompt(): Prompt {
   return {
     system: `You are extracting eligibility criteria from a CLO private placement memorandum's markdown text.
+
+PPM ELIGIBILITY FORMAT:
+- Eligibility criteria are typically defined under \u201cEligibility Criteria\u201d or \u201cCollateral Obligation\u201d in the Definitions section.
+- They are usually lettered (a) through (z) or numbered.
+- Criteria use defined terms (in smart quotes \u201c\u201d) extensively — extract the criterion text as-is.
+- Some criteria are in the main body, others in annexes/schedules appended to the document.
 
 Extract EVERY eligibility criterion (typically 30-45 items). Be exhaustive — check annexes and schedules in the text.
 
@@ -276,6 +357,13 @@ export function ppmPortfolioConstraintsPrompt(): Prompt {
   return {
     system: `You are extracting portfolio constraints from a CLO private placement memorandum's markdown text.
 
+PPM CONSTRAINT FORMAT:
+- Portfolio Profile Tests and Collateral Quality Tests are defined terms in the Definitions section.
+- Tests use alphabetical lettering matching compliance report format: (a) through (s), (t)(i)-(t)(v), (u)(i)-(u)(v), (aa)-(dd).
+- Values are written as "per cent." not "%" — convert accordingly.
+- WARF limits are absolute numbers (e.g., "<= 27.00"), not percentages.
+- Some constraints are conditional/tiered (different limits during vs after reinvestment period).
+
 Extract ALL collateral quality tests: WARF, WAS, WAL, diversity score, WA recovery rate, etc. Each with name, agency, value.
 
 Extract ALL portfolio profile tests (typically 25-35 tests with min/max limits). Include conditional/tiered limits. Each test is a record with min, max, and optional notes.
@@ -288,6 +376,14 @@ ${COMMON_RULES}`,
 export function ppmWaterfallRulesPrompt(): Prompt {
   return {
     system: `You are extracting waterfall rules from a CLO private placement memorandum's markdown text.
+
+CLO WATERFALL FORMAT:
+- The waterfall is structured as lettered paragraphs: (A) through (CC) or similar, typically 25-30 items.
+- It appears in the Conditions of the Notes section (often titled "Priority of Payments" or "Application of Interest/Principal Proceeds").
+- There are separate interest and principal waterfalls.
+- Each step describes: who gets paid, the calculation basis, and any conditions.
+- Clean-Up Call threshold may be 10% OR 15% of original balance — extract the exact value, do not assume.
+- Governing law may be English law even for Irish-domiciled issuers.
 
 Extract as structured prose:
 - interestPriority: The full interest waterfall priority of payments
@@ -303,13 +399,19 @@ export function ppmFeesPrompt(): Prompt {
   return {
     system: `You are extracting fees and account definitions from a CLO private placement memorandum's markdown text.
 
+CLO FEE STRUCTURE:
+- CLO management fees are typically split into two components:
+  "Senior Collateral Management Fee" — paid before note interest (higher in the waterfall, safer)
+  "Subordinated Collateral Management Fee" — paid from residual after all note interest (lower in waterfall)
+- Fee definitions follow the pattern: "Term" means [definition] in the Definitions section.
+- Look for "per annum" and "calculated on each Payment Date" as fee-defining phrases.
+- "Senior Expenses Cap" is a hard cap on total annual non-CM expenses (typically €350,000–€500,000).
+- The Trustee fee is paid under "Agency and Account Bank Agreement".
+
 Extract ALL fees: name, rate, basis, description.
 
-Common CLO fees to look for:
-- Senior Management Fee / Senior Collateral Management Fee
-- Subordinated Management Fee / Subordinated Collateral Management Fee
+Additional CLO fees to look for:
 - Incentive Management Fee / Performance Fee
-- Trustee Fee
 - Administrative Expenses / Administrative Expense Cap
 - Arrangement Fee
 - Placement Fee
@@ -352,6 +454,14 @@ IMPORTANT — common aliases for these dates:
 - firstPaymentDate: "First Payment Date", "First Distribution Date", "First Interest Payment Date"
 - paymentFrequency: "quarterly", "semi-annually" — look for "Payment Dates: each [frequency]"
 
+PPM DATE FORMAT:
+- PPMs use "DD Month YYYY" format (e.g., "15 April 2038") — convert to YYYY-MM-DD.
+- Dates are often in the Definitions section as defined terms with smart quotes:
+  \u201cIssue Date\u201d means [date], \u201cMaturity Date\u201d means [date], etc.
+- Key defined terms to look for: "Issue Date", "Effective Date", "Closing Date", "Maturity Date",
+  "Non-Call Period", "Reinvestment Period", "Payment Date", "Determination Date", "Due Period", "Record Date".
+- Payment dates for European CLOs are typically quarterly on the 15th (Jan/Apr/Jul/Oct).
+
 If a date appears in the tranche/notes table (e.g., maturity column), that counts as an explicit mention.
 
 ${COMMON_RULES}`,
@@ -363,11 +473,21 @@ export function ppmKeyPartiesPrompt(): Prompt {
   return {
     system: `You are extracting key parties from a CLO private placement memorandum's markdown text.
 
+CLO PPM KEY PARTIES FORMAT:
+- Key parties are typically on the transaction overview page in a dots-leader format:
+  "Role..................................... Entity Name."
+  The number of dots varies. Extract both the role and entity from each line.
+- Common CLO roles: Issuer, Collateral Manager, Trustee, Account Bank, Paying Agent, Calculation Agent,
+  Registrar, Transfer Agent, Collateral Administrator, Arranger, Placement Agent.
+- BNY Mellon often appears in multiple roles: Trustee (Corporate Trustee Services Limited),
+  Account Bank (London Branch), Paying Agent (London Branch).
+- The Collateral Administrator may be a separate entity from the Trustee.
+
 Extract key parties: role, entity (e.g., Trustee, Collateral Manager, Issuer, Arranger, Placement Agent, etc.)
 
 Extract collateral manager details: name, parent, replacementMechanism.
 
-cmDetails.name is the MOST IMPORTANT field. The Collateral Manager is the entity that manages the CLO's loan portfolio. Look for "The Collateral Manager is [name]" or "[name] (as Collateral Manager)".
+cmDetails.name is the MOST IMPORTANT field. The Collateral Manager is the entity that manages the CLO's loan portfolio. Look for "The Collateral Manager is [name]", "[name] (as Collateral Manager)", or the dots-leader line.
 
 ${COMMON_RULES}`,
     user: `Extract all key parties from the following markdown text.`,

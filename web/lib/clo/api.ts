@@ -100,6 +100,7 @@ export async function callAnthropic(
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: maxTokens,
+      temperature: 0,
       system,
       messages: [{ role: "user", content }],
     }),
@@ -155,6 +156,7 @@ export async function callAnthropicWithTool(
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: maxTokens,
+      temperature: 0,
       system,
       messages: [{ role: "user", content }],
       tools: [{

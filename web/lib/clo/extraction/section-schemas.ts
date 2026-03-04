@@ -11,6 +11,12 @@ export const complianceSummarySchema = z.object({
   dealName: z.string().nullable().optional(),
   trusteeName: z.string().nullable().optional(),
   collateralManager: z.string().nullable().optional(),
+  closingDate: z.string().nullable().optional(),
+  statedMaturity: z.string().nullable().optional(),
+  nextPaymentDate: z.string().nullable().optional(),
+  collectionPeriodEnd: z.string().nullable().optional(),
+  reinvestmentPeriodEnd: z.string().nullable().optional(),
+  nonCallPeriodEnd: z.string().nullable().optional(),
   tranches: z.array(z.object({
     className: z.string(),
     principalAmount: z.number().nullable().optional(),
