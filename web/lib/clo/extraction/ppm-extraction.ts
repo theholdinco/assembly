@@ -61,7 +61,7 @@ export async function runSectionPpmExtraction(
   // Fallback: if key_dates returned all nulls, re-extract from transaction_overview text
   // (dates often appear in the term sheet/summary which the mapper may assign to transaction_overview)
   const keyDatesData = sections.key_dates as Record<string, unknown> | null;
-  const isNullish = (v: unknown) => v == null || v === "null";
+  const isNullish = (v: unknown) => v == null || v === "null" || v === "<UNKNOWN>" || v === "UNKNOWN";
   const allDatesNull = keyDatesData && Object.values(keyDatesData).every(isNullish);
   if (allDatesNull) {
     const overviewText = sectionTexts.find((t) => t.sectionType === "transaction_overview");

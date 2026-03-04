@@ -339,6 +339,7 @@ CRITICAL: Extract ACTUAL DATE VALUES, not field labels.
 - If only month/year is given, use the 15th (e.g., "July 2035" -> "2035-07-15").
 - These dates are often in a STRUCTURED TABLE in the Transaction Overview or Term Sheet section. Look for rows/columns labeled with date names.
 - The reinvestment period and non-call period are KEY dates for CLO waterfall modeling — search thoroughly.
+- NEVER return "<UNKNOWN>" or "UNKNOWN" — use null if a date is not found.
 
 Extract: originalIssueDate, currentIssueDate, maturityDate, nonCallPeriodEnd, reinvestmentPeriodEnd, firstPaymentDate, paymentFrequency.
 
