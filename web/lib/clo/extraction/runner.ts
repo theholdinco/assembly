@@ -8,13 +8,12 @@ import { validateExtraction, validateCapStructure, validateSectionExtraction, bu
 import { zodToToolSchema } from "./schema-utils";
 import { mapDocument } from "./document-mapper";
 import { extractAllSectionTexts, extractSectionText, type SectionText } from "./text-extractor";
-import { extractAllSections, extractSection } from "./section-extractor";
+import { extractAllSections, extractSection, enhanceWithTableData } from "./section-extractor";
 import { normalizeSectionResults } from "./normalizer";
 import { extractPdfText } from "./pdf-text-extractor";
 import { extractPdfTables } from "./table-extractor";
-import { createAuditLog, logAuditSummary } from "./audit-logger";
-import { reconcileDates } from "./date-reconciler";
 import { parseComplianceSummaryTables } from "./table-parser";
+import { reconcileDates } from "./date-reconciler";
 // Common field name aliases the model returns → correct DB column names
 const POOL_SUMMARY_ALIASES: Record<string, string> = {
   aggregate_principal_balance: "total_principal_balance",
@@ -107,46 +106,31 @@ async function getOrCreateDeal(profileId: string): Promise<string> {
   return rows[0].id;
 }
 
-// ~500k chars ≈ 125k tokens — leaves room for system prompt + schema within the 200k token limit
-const TEXT_CHUNK_MAX_CHARS = 500_000;
-const TEXT_CHUNK_OVERLAP_PAGES = 5;
+const TEXT_CHUNK_PAGES = 50; // pages per chunk when splitting extracted text
+const TEXT_CHUNK_OVERLAP = 5; // overlap pages between chunks for context continuity
 
 function splitTextIntoPageChunks(
   extractedText: string,
-  maxCharsPerChunk: number = TEXT_CHUNK_MAX_CHARS,
+  pagesPerChunk: number = TEXT_CHUNK_PAGES,
+  overlap: number = TEXT_CHUNK_OVERLAP,
 ): string[] {
-  if (extractedText.length <= maxCharsPerChunk) return [extractedText];
-
   // Split on page markers: "--- Page N ---"
   const pagePattern = /--- Page \d+ ---/g;
-  const markers: { index: number }[] = [];
+  const markers: { index: number; marker: string }[] = [];
   let match;
   while ((match = pagePattern.exec(extractedText)) !== null) {
-    markers.push({ index: match.index });
+    markers.push({ index: match.index, marker: match[0] });
   }
 
-  if (markers.length === 0) return [extractedText];
+  if (markers.length <= pagesPerChunk) return [extractedText];
 
-  // Find how many pages fit per chunk
   const chunks: string[] = [];
-  let startMarker = 0;
-
-  while (startMarker < markers.length) {
-    // Binary search for last page that fits within maxCharsPerChunk
-    let endMarker = startMarker + 1;
-    while (endMarker < markers.length) {
-      const chunkEnd = endMarker < markers.length ? markers[endMarker].index : extractedText.length;
-      if (chunkEnd - markers[startMarker].index > maxCharsPerChunk) break;
-      endMarker++;
-    }
-
-    const startIdx = markers[startMarker].index;
-    const endIdx = endMarker < markers.length ? markers[endMarker].index : extractedText.length;
+  for (let i = 0; i < markers.length; i += pagesPerChunk - overlap) {
+    const startIdx = markers[i].index;
+    const endMarkerIdx = Math.min(i + pagesPerChunk, markers.length);
+    const endIdx = endMarkerIdx < markers.length ? markers[endMarkerIdx].index : extractedText.length;
     chunks.push(extractedText.slice(startIdx, endIdx).trim());
-
-    // Advance with overlap
-    const pagesInChunk = endMarker - startMarker;
-    startMarker += Math.max(1, pagesInChunk - TEXT_CHUNK_OVERLAP_PAGES);
+    if (endMarkerIdx >= markers.length) break;
   }
 
   return chunks;
@@ -182,13 +166,13 @@ async function callClaudeStructured(
       const result = await callAnthropicWithTool(apiKey, system, content, maxTokens, tool, toolName);
       if (result.error?.includes("prompt is too long")) {
         // Text too large for single chunk — re-split with smaller chunks
-        return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(TEXT_CHUNK_MAX_CHARS / 2));
+        return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(TEXT_CHUNK_PAGES / 2));
       }
       if (result.error) return { data: null, truncated: false, error: result.error, status: result.status };
       return { data: result.data, truncated: result.truncated };
     }
 
-    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, TEXT_CHUNK_MAX_CHARS);
+    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, TEXT_CHUNK_PAGES);
   }
 
   // Fallback: no extracted text available, use PDF document chunking
@@ -212,14 +196,14 @@ async function callClaudeStructuredTextChunked(
   maxTokens: number,
   tool: { name: string; description: string; inputSchema: Record<string, unknown> },
   extractedText: string,
-  maxCharsPerChunk: number,
+  pagesPerChunk: number,
 ): Promise<{ data: Record<string, unknown> | null; truncated: boolean; error?: string; status?: number }> {
-  const chunks = splitTextIntoPageChunks(extractedText, maxCharsPerChunk);
-  console.log(`[callClaudeStructured] Splitting text into ${chunks.length} chunks (max ${Math.round(maxCharsPerChunk / 1000)}k chars each)`);
+  const chunks = splitTextIntoPageChunks(extractedText, pagesPerChunk);
+  console.log(`[callClaudeStructured] Splitting text into ${chunks.length} chunks (${pagesPerChunk} pages each, ${TEXT_CHUNK_OVERLAP} overlap)`);
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk, i) => {
-      const chunkLabel = `chunk ${i + 1}/${chunks.length}`;
+      const chunkLabel = `pages chunk ${i + 1}/${chunks.length}`;
       const chunkUserText = chunks.length > 1
         ? `[NOTE: This document has been split due to size. You are viewing ${chunkLabel}. Extract all information from these pages.]\n\n${userText}\n\n--- DOCUMENT TEXT ---\n${chunk}`
         : `${userText}\n\n--- DOCUMENT TEXT ---\n${chunk}`;
@@ -230,8 +214,8 @@ async function callClaudeStructuredTextChunked(
   );
 
   const promptTooLong = chunkResults.some((r) => r.error?.includes("prompt is too long"));
-  if (promptTooLong && maxCharsPerChunk > 100_000) {
-    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(maxCharsPerChunk / 2));
+  if (promptTooLong && pagesPerChunk > 10) {
+    return callClaudeStructuredTextChunked(apiKey, system, userText, maxTokens, tool, extractedText, Math.floor(pagesPerChunk / 2));
   }
 
   const firstError = chunkResults.find((r) => r.error);
@@ -756,23 +740,6 @@ export async function runSectionExtraction(
   const documentMap = await mapDocument(apiKey, documents);
   await progress("mapping_done", `Found ${documentMap.sections.length} sections`);
 
-  // Phase 1.5: Extract tables for compliance reports (table-first hybrid)
-  let tablePages: import("./table-extractor").PageTableData[] | undefined;
-  let auditLog: import("./audit-logger").ExtractionAuditLog | undefined;
-
-  if (documentMap.documentType === "compliance_report") {
-    try {
-      await progress("extracting_tables", "Extracting tables from PDF...");
-      const tableResult = await extractPdfTables(pdfDoc.base64);
-      tablePages = tableResult.pages;
-      auditLog = createAuditLog("compliance_report", tableResult.totalPages);
-      console.log(`[extraction] pdfplumber extracted tables from ${tableResult.totalPages} pages (${tablePages.reduce((sum, p) => sum + p.tables.length, 0)} total tables)`);
-      await progress("extracting_tables_done", `Found ${tablePages.reduce((sum, p) => sum + p.tables.length, 0)} tables across ${tableResult.totalPages} pages`);
-    } catch (err) {
-      console.warn(`[extraction] pdfplumber table extraction failed, continuing with Claude-only: ${(err as Error).message}`);
-    }
-  }
-
   // Phase 2: Transcribe sections to markdown (parallel)
   await progress("transcribing", `Transcribing ${documentMap.sections.length} sections to text...`);
   const sectionTexts = await extractAllSectionTexts(apiKey, pdfDoc, documentMap);
@@ -781,9 +748,30 @@ export async function runSectionExtraction(
 
   // Phase 3: Extract structured data per section (parallel)
   await progress("extracting", `Extracting structured data from ${successfulTexts.length} sections...`);
-  const sectionResults = await extractAllSections(apiKey, sectionTexts, documentMap.documentType, 3, tablePages, auditLog);
+  let sectionResults = await extractAllSections(apiKey, sectionTexts, documentMap.documentType);
   const successfulExtracts = sectionResults.filter((r) => r.data != null);
   await progress("extracting_done", `Extracted data from ${successfulExtracts.length}/${sectionTexts.length} sections`);
+
+  // Phase 3.5: Enhance Claude results with pdfplumber table data (compliance only)
+  let extractionAuditLog: import("./audit-logger").ExtractionAuditLog | undefined;
+  let tablePagesForDates: import("./table-extractor").PageTableData[] | undefined;
+
+  if (documentMap.documentType === "compliance_report") {
+    try {
+      await progress("enhancing_tables", "Enhancing extraction with pdfplumber tables...");
+      const tableResult = await extractPdfTables(pdfDoc.base64);
+      tablePagesForDates = tableResult.pages;
+      const totalTables = tableResult.pages.reduce((sum, p) => sum + p.tables.length, 0);
+      console.log(`[extraction] pdfplumber found ${totalTables} tables across ${tableResult.totalPages} pages`);
+
+      const { enhanced, auditLog } = enhanceWithTableData(sectionResults, tableResult.pages, documentMap);
+      sectionResults = enhanced;
+      extractionAuditLog = auditLog;
+      await progress("enhancing_tables_done", `Enhanced extraction with table data`);
+    } catch (err) {
+      console.warn(`[extraction] table enhancement failed (non-fatal): ${(err as Error).message}`);
+    }
+  }
 
   // Build sections map
   const sections: Record<string, Record<string, unknown> | null> = {};
@@ -816,10 +804,6 @@ export async function runSectionExtraction(
     console.log(`[extraction] ${sectionType}: ${summary.join(", ")}`);
   }
   console.log(`[extraction] ═══════════════════════════`);
-
-  if (auditLog) {
-    logAuditSummary(auditLog);
-  }
 
   // Extract reportDate from compliance_summary
   const summarySection = sections.compliance_summary as Record<string, unknown> | null;
@@ -1001,80 +985,71 @@ export async function runSectionExtraction(
     }
   }
 
-  // Phase 3.5: Date reconciliation (if PPM data exists)
-  // Extract deal dates from table page text via regex (independent of Claude's compliance_summary)
-  let dealDates: import("./table-parser").ParsedDealDates | undefined;
-  if (tablePages) {
-    const summarySection = documentMap.sections.find((s) => s.sectionType === "compliance_summary");
-    if (summarySection) {
-      const summaryResult = parseComplianceSummaryTables(tablePages, summarySection.pageStart, summarySection.pageEnd);
-      if (summaryResult.data?.dealDates) {
-        dealDates = summaryResult.data.dealDates;
+  // Phase 3.75: Date reconciliation (if PPM data + compliance dates available)
+  if (tablePagesForDates) {
+    try {
+      const summaryMapSection = documentMap.sections.find((s) => s.sectionType === "compliance_summary");
+      if (summaryMapSection) {
+        const summaryParsed = parseComplianceSummaryTables(tablePagesForDates, summaryMapSection.pageStart, summaryMapSection.pageEnd);
+        const dealDates = summaryParsed.data?.dealDates;
+
+        if (dealDates) {
+          const profileRows = await query<{ extracted_constraints: Record<string, unknown> }>(
+            "SELECT extracted_constraints FROM clo_profiles WHERE id = $1",
+            [profileId],
+          );
+          const ppmConstraints = profileRows[0]?.extracted_constraints ?? {};
+          const ppmKeyDates = (ppmConstraints as Record<string, unknown>).keyDates as Record<string, string | null> | undefined ?? {};
+
+          const complianceDates: Record<string, string | null> = {
+            closing_date: dealDates.closingDate ?? null,
+            effective_date: dealDates.effectiveDate ?? null,
+            reinvestment_period_end: dealDates.reinvestmentPeriodEnd ?? null,
+            stated_maturity_date: dealDates.statedMaturity ?? null,
+            report_date: dealDates.reportDate ?? null,
+            payment_date: dealDates.paymentDate ?? null,
+          };
+
+          const ppmDates: Record<string, string | null> = {
+            closing_date: (ppmKeyDates as Record<string, string | null>).originalIssueDate ?? null,
+            current_issue_date: (ppmKeyDates as Record<string, string | null>).currentIssueDate ?? null,
+            reinvestment_period_end: (ppmKeyDates as Record<string, string | null>).reinvestmentPeriodEnd ?? null,
+            non_call_period_end: (ppmKeyDates as Record<string, string | null>).nonCallPeriodEnd ?? null,
+            stated_maturity_date: (ppmKeyDates as Record<string, string | null>).maturityDate ?? null,
+            first_payment_date: (ppmKeyDates as Record<string, string | null>).firstPaymentDate ?? null,
+            payment_frequency: (ppmKeyDates as Record<string, string | null>).paymentFrequency ?? null,
+          };
+
+          const reconciliation = reconcileDates({ ppmDates, complianceDates });
+          const d = reconciliation.resolvedDates;
+
+          const updateFields: string[] = [];
+          const updateValues: unknown[] = [];
+          let paramIdx = 1;
+          for (const col of ["closing_date", "effective_date", "reinvestment_period_end", "non_call_period_end", "stated_maturity_date"]) {
+            if (d[col]) {
+              updateFields.push(`${col} = $${paramIdx++}`);
+              updateValues.push(d[col]);
+            }
+          }
+          if (updateFields.length > 0) {
+            updateValues.push(dealId);
+            await query(
+              `UPDATE clo_deals SET ${updateFields.join(", ")}, updated_at = now() WHERE id = $${paramIdx}`,
+              updateValues,
+            );
+            console.log(`[extraction] updated clo_deals with ${updateFields.length} reconciled dates`);
+          }
+          if (d.payment_date) {
+            await query(
+              `UPDATE clo_report_periods SET payment_date = $1, updated_at = now() WHERE id = $2`,
+              [d.payment_date, reportPeriodId],
+            );
+          }
+        }
       }
-    }
-  }
-
-  if (dealDates) {
-    await progress("reconciling_dates", "Reconciling dates between PPM and compliance...");
-    const profileRows = await query<{ extracted_constraints: Record<string, unknown> }>(
-      "SELECT extracted_constraints FROM clo_profiles WHERE id = $1",
-      [profileId],
-    );
-    const ppmConstraints = profileRows[0]?.extracted_constraints ?? {};
-    const ppmKeyDates = (ppmConstraints as any).keyDates ?? {};
-
-    const complianceDates: Record<string, string | null> = {
-      closing_date: dealDates.closingDate ?? null,
-      effective_date: dealDates.effectiveDate ?? null,
-      reinvestment_period_end: dealDates.reinvestmentPeriodEnd ?? null,
-      stated_maturity_date: dealDates.statedMaturity ?? null,
-      report_date: dealDates.reportDate ?? null,
-      payment_date: dealDates.paymentDate ?? null,
-    };
-
-    const ppmDates: Record<string, string | null> = {
-      closing_date: ppmKeyDates.originalIssueDate ?? null,
-      current_issue_date: ppmKeyDates.currentIssueDate ?? null,
-      reinvestment_period_end: ppmKeyDates.reinvestmentPeriodEnd ?? null,
-      non_call_period_end: ppmKeyDates.nonCallPeriodEnd ?? null,
-      stated_maturity_date: ppmKeyDates.maturityDate ?? null,
-      first_payment_date: ppmKeyDates.firstPaymentDate ?? null,
-      payment_frequency: ppmKeyDates.paymentFrequency ?? null,
-    };
-
-    const reconciliation = reconcileDates({ ppmDates, complianceDates });
-
-    // Update clo_deals with resolved dates
-    const d = reconciliation.resolvedDates;
-    const updateFields: string[] = [];
-    const updateValues: unknown[] = [];
-    let paramIdx = 1;
-
-    const dateColumns = [
-      "closing_date", "effective_date", "reinvestment_period_end",
-      "non_call_period_end", "stated_maturity_date",
-    ];
-    for (const col of dateColumns) {
-      if (d[col]) {
-        updateFields.push(`${col} = $${paramIdx++}`);
-        updateValues.push(d[col]);
-      }
-    }
-
-    if (updateFields.length > 0) {
-      updateValues.push(dealId);
-      await query(
-        `UPDATE clo_deals SET ${updateFields.join(", ")}, updated_at = now() WHERE id = $${paramIdx}`,
-        updateValues,
-      );
-      console.log(`[extraction] updated clo_deals with ${updateFields.length} reconciled dates`);
-    }
-
-    if (d.payment_date) {
-      await query(
-        `UPDATE clo_report_periods SET payment_date = $1, updated_at = now() WHERE id = $2`,
-        [d.payment_date, reportPeriodId],
-      );
+    } catch (err) {
+      console.warn(`[extraction] date reconciliation failed (non-fatal): ${(err as Error).message}`);
     }
   }
 
@@ -1226,7 +1201,7 @@ export async function runSectionExtraction(
      WHERE id = $5`,
     [
       status,
-      JSON.stringify({ ...rawOutputs, _auditLog: auditLog }),
+      JSON.stringify({ ...rawOutputs, _auditLog: extractionAuditLog }),
       normalized.supplementaryData ? JSON.stringify(normalized.supplementaryData) : null,
       JSON.stringify(validationResult),
       reportPeriodId,

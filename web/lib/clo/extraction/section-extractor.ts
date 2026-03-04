@@ -3,16 +3,6 @@ import { callAnthropicWithTool } from "../api";
 import { zodToToolSchema } from "./schema-utils";
 import * as schemas from "./section-schemas";
 import * as prompts from "./section-prompts";
-import type { PageTableData } from "./table-extractor";
-import {
-  parseComplianceSummaryTables,
-  parseComplianceTestTables,
-  parseHoldingsTables,
-  parseConcentrationFromTests,
-  type TableParseResult,
-  type ParsedComplianceTest,
-} from "./table-parser";
-import { addAuditEntry, type ExtractionAuditLog } from "./audit-logger";
 
 export interface SectionExtractionResult {
   sectionType: string;
@@ -71,6 +61,7 @@ function needsRepair(sectionType: string, data: Record<string, unknown> | null):
   if (sectionType === "capital_structure") {
     const cap = data.capitalStructure;
     if (!Array.isArray(cap) || cap.length === 0) return false;
+    // Check if any tranche is missing the required "class" field
     const broken = cap.filter((t: Record<string, unknown>) => !t.class || !t.designation);
     if (broken.length > 0) {
       console.log(`[section-extractor] capital_structure has ${broken.length}/${cap.length} tranches with missing class/designation — scheduling repair`);
@@ -124,146 +115,11 @@ Rules:
   return result.data;
 }
 
-// ---------------------------------------------------------------------------
-// Table extraction + merge logic
-// ---------------------------------------------------------------------------
-
-// Sections where we run both table + Claude and merge results
-const TABLE_ELIGIBLE_SECTIONS = new Set([
-  "compliance_summary",
-  "par_value_tests",
-  "interest_coverage_tests",
-  "asset_schedule",
-  "concentration_tables",
-]);
-
-let cachedParsedTests: ParsedComplianceTest[] | null = null;
-
-function tryTableExtraction(
-  sectionType: string,
-  tablePages: PageTableData[],
-  pageStart: number,
-  pageEnd: number,
-): TableParseResult<unknown> | null {
-  if (!TABLE_ELIGIBLE_SECTIONS.has(sectionType)) return null;
-
-  switch (sectionType) {
-    case "compliance_summary": {
-      const result = parseComplianceSummaryTables(tablePages, pageStart, pageEnd);
-      return result as TableParseResult<unknown>;
-    }
-    case "par_value_tests":
-    case "interest_coverage_tests": {
-      const result = parseComplianceTestTables(tablePages, pageStart, pageEnd);
-      if (result.data) cachedParsedTests = result.data;
-      const schemaData = result.data ? {
-        tests: result.data.map((t) => ({
-          ...t,
-          cushionPct: null,
-          cushionAmount: null,
-          consequenceIfFail: null,
-        })),
-        parValueAdjustments: [],
-        interestAmountsPerTranche: [],
-      } : null;
-      return { ...result, data: schemaData };
-    }
-    case "asset_schedule": {
-      const result = parseHoldingsTables(tablePages, pageStart, pageEnd);
-      const schemaData = result.data ? { holdings: result.data } : null;
-      return { ...result, data: schemaData };
-    }
-    case "concentration_tables": {
-      if (!cachedParsedTests) return null;
-      const result = parseConcentrationFromTests(cachedParsedTests);
-      const schemaData = result.data ? { concentrations: result.data } : null;
-      return { ...result, data: schemaData };
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * Merge table-extracted data onto Claude-extracted data.
- * Table data = ground truth for numbers/dates (direct from pdfplumber, no hallucination).
- * Claude data = better for text fields, classifications, and complex nested structures.
- */
-function mergeExtractionResults(
-  tableData: Record<string, unknown>,
-  claudeData: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged = { ...claudeData };
-
-  for (const [key, tableValue] of Object.entries(tableData)) {
-    if (tableValue == null || tableValue === "") continue;
-    // dealDates is a sidecar for date reconciliation, not part of the schema
-    if (key === "dealDates") continue;
-
-    const claudeValue = merged[key];
-
-    if (Array.isArray(tableValue)) {
-      // Use whichever array extracted more items (more complete coverage)
-      if (!Array.isArray(claudeValue) || tableValue.length > claudeValue.length) {
-        merged[key] = tableValue;
-      }
-    } else if (typeof tableValue === "number") {
-      // Table numbers are precise — prefer over Claude's potentially hallucinated values
-      merged[key] = tableValue;
-    } else if (typeof tableValue === "string") {
-      // For dates and identifiers, prefer table if Claude has nothing
-      if (claudeValue == null || claudeValue === "" || claudeValue === "null") {
-        merged[key] = tableValue;
-      }
-    }
-  }
-
-  return merged;
-}
-
-// ---------------------------------------------------------------------------
-// Main extraction
-// ---------------------------------------------------------------------------
-
 export async function extractSection(
   apiKey: string,
   sectionText: SectionText,
   documentType: "compliance_report" | "ppm",
-  tablePages?: PageTableData[],
-  auditLog?: ExtractionAuditLog,
 ): Promise<SectionExtractionResult> {
-  const startTime = Date.now();
-
-  // Run table extraction (instant, no API call) for eligible compliance sections
-  let tableResult: TableParseResult<unknown> | null = null;
-  if (documentType === "compliance_report" && tablePages && TABLE_ELIGIBLE_SECTIONS.has(sectionText.sectionType)) {
-    tableResult = tryTableExtraction(sectionText.sectionType, tablePages, sectionText.pageStart, sectionText.pageEnd);
-    if (tableResult) {
-      console.log(`[section-extractor] ${sectionText.sectionType}: table extraction got ${tableResult.recordCount} records (quality=${tableResult.quality.toFixed(2)})`);
-    }
-  }
-
-  // concentration_tables is derived from cached tests — no Claude call needed
-  if (sectionText.sectionType === "concentration_tables" && tableResult?.data && tableResult.quality > 0) {
-    if (auditLog) {
-      addAuditEntry(auditLog, {
-        sectionType: sectionText.sectionType,
-        method: "table",
-        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-        recordsExtracted: tableResult.recordCount,
-        fieldsPerRecord: 0,
-        qualityScore: tableResult.quality,
-        nullFieldRatio: tableResult.nullFieldRatio,
-        typeErrors: tableResult.typeErrors,
-        rawSamples: [],
-        dataQualityNotes: tableResult.notes,
-        durationMs: Date.now() - startTime,
-      });
-    }
-    return { sectionType: sectionText.sectionType, data: tableResult.data as Record<string, unknown>, truncated: false };
-  }
-
-  // Always run Claude extraction
   const config = getSectionConfig(sectionText.sectionType, documentType);
   if (!config) {
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: `Unknown section type: ${sectionText.sectionType}` };
@@ -286,28 +142,6 @@ export async function extractSection(
 
   if (result.error) {
     console.error(`[section-extractor] ${sectionText.sectionType}: ${result.error.slice(0, 200)}`);
-
-    // If Claude failed but table succeeded, use table data alone
-    if (tableResult?.data) {
-      console.log(`[section-extractor] ${sectionText.sectionType}: Claude failed, using table data only`);
-      if (auditLog) {
-        addAuditEntry(auditLog, {
-          sectionType: sectionText.sectionType,
-          method: "table",
-          pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-          recordsExtracted: tableResult.recordCount,
-          fieldsPerRecord: 0,
-          qualityScore: tableResult.quality,
-          nullFieldRatio: tableResult.nullFieldRatio,
-          typeErrors: tableResult.typeErrors,
-          rawSamples: [],
-          dataQualityNotes: [...tableResult.notes, `Claude failed: ${result.error.slice(0, 100)}`],
-          durationMs: Date.now() - startTime,
-        });
-      }
-      return { sectionType: sectionText.sectionType, data: tableResult.data as Record<string, unknown>, truncated: false };
-    }
-
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: result.error };
   }
 
@@ -317,46 +151,6 @@ export async function extractSection(
   if (needsRepair(sectionText.sectionType, data)) {
     const repaired = await repairExtraction(apiKey, sectionText, data!, config);
     if (repaired) data = repaired;
-  }
-
-  // Merge: overlay table-extracted values onto Claude's result
-  if (tableResult?.data && data) {
-    const before = JSON.stringify(data);
-    data = mergeExtractionResults(tableResult.data as Record<string, unknown>, data);
-    const changed = JSON.stringify(data) !== before;
-    console.log(`[section-extractor] ${sectionText.sectionType}: merged table+claude${changed ? " (table improved some fields)" : " (no changes)"}`);
-
-    if (auditLog) {
-      addAuditEntry(auditLog, {
-        sectionType: sectionText.sectionType,
-        method: "table+claude_merged",
-        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-        recordsExtracted: tableResult.recordCount,
-        fieldsPerRecord: 0,
-        qualityScore: tableResult.quality,
-        nullFieldRatio: tableResult.nullFieldRatio,
-        typeErrors: tableResult.typeErrors,
-        rawSamples: [],
-        dataQualityNotes: tableResult.notes,
-        durationMs: Date.now() - startTime,
-      });
-    }
-  } else {
-    if (auditLog) {
-      addAuditEntry(auditLog, {
-        sectionType: sectionText.sectionType,
-        method: "claude",
-        pagesScanned: `${sectionText.pageStart}-${sectionText.pageEnd}`,
-        recordsExtracted: 0,
-        fieldsPerRecord: 0,
-        qualityScore: data ? 1 : 0,
-        nullFieldRatio: 0,
-        typeErrors: [],
-        rawSamples: [],
-        dataQualityNotes: [],
-        durationMs: Date.now() - startTime,
-      });
-    }
   }
 
   return {
@@ -371,67 +165,10 @@ export async function extractAllSections(
   sectionTexts: SectionText[],
   documentType: "compliance_report" | "ppm",
   concurrency = 3,
-  tablePages?: PageTableData[],
-  auditLog?: ExtractionAuditLog,
 ): Promise<SectionExtractionResult[]> {
-  // Reset cached tests at the start of each extraction run
-  cachedParsedTests = null;
-
   const results: SectionExtractionResult[] = [];
   const items = [...sectionTexts];
 
-  // For compliance with table data: process test sections first (sequentially)
-  // so concentration_tables can use cached results, then everything else in parallel
-  if (documentType === "compliance_report" && tablePages) {
-    // Sections that must run first (tests populate cache for concentrations)
-    const testSections = items.filter((s) =>
-      s.sectionType === "par_value_tests" || s.sectionType === "interest_coverage_tests",
-    );
-    // Concentration depends on cached tests
-    const concentrationSection = items.filter((s) => s.sectionType === "concentration_tables");
-    // Everything else can run in parallel
-    const rest = items.filter((s) =>
-      s.sectionType !== "par_value_tests" &&
-      s.sectionType !== "interest_coverage_tests" &&
-      s.sectionType !== "concentration_tables",
-    );
-
-    // Phase A: test sections sequentially (populates cachedParsedTests)
-    for (const st of testSections) {
-      console.log(`[section-extractor] table+claude merge: ${st.sectionType}(${st.markdown.length} chars)`);
-      const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
-      const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
-      console.log(`[section-extractor] ${st.sectionType}: ${status}`);
-      results.push(result);
-    }
-
-    // Phase B: concentration (uses cached tests, no Claude call)
-    for (const st of concentrationSection) {
-      const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
-      results.push(result);
-    }
-
-    // Phase C: all other sections in parallel batches
-    for (let i = 0; i < rest.length; i += concurrency) {
-      const batch = rest.slice(i, i + concurrency);
-      const batchNum = Math.floor(i / concurrency) + 1;
-      const totalBatches = Math.ceil(rest.length / concurrency);
-      console.log(`[section-extractor] batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
-      const batchResults = await Promise.all(
-        batch.map(async (st) => {
-          const result = await extractSection(apiKey, st, documentType, tablePages, auditLog);
-          const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
-          console.log(`[section-extractor] ${st.sectionType}: ${status}`);
-          return result;
-        }),
-      );
-      results.push(...batchResults);
-    }
-
-    return results;
-  }
-
-  // Original batched parallel logic for PPM or when no table data
   for (let i = 0; i < items.length; i += concurrency) {
     const batch = items.slice(i, i + concurrency);
     const batchNum = Math.floor(i / concurrency) + 1;
@@ -439,7 +176,7 @@ export async function extractAllSections(
     console.log(`[section-extractor] batch ${batchNum}/${totalBatches}: ${batch.map((s) => `${s.sectionType}(${s.markdown.length} chars)`).join(", ")}`);
     const batchResults = await Promise.all(
       batch.map(async (st) => {
-        const result = await extractSection(apiKey, st, documentType, undefined, auditLog);
+        const result = await extractSection(apiKey, st, documentType);
         const status = result.data ? "OK" : `FAILED${result.error ? `: ${result.error.slice(0, 100)}` : ""}`;
         console.log(`[section-extractor] ${st.sectionType}: ${status}`);
         return result;
@@ -449,4 +186,186 @@ export async function extractAllSections(
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Table enhancement (post-processing) — overlays pdfplumber table data onto
+// Claude's extraction results. The existing extraction pipeline is untouched;
+// this only IMPROVES results after the fact.
+// ---------------------------------------------------------------------------
+
+import type { PageTableData } from "./table-extractor";
+import {
+  parseComplianceSummaryTables,
+  parseComplianceTestTables,
+  parseHoldingsTables,
+  parseConcentrationFromTests,
+  type ParsedComplianceTest,
+} from "./table-parser";
+import { createAuditLog, addAuditEntry, logAuditSummary, type ExtractionAuditLog } from "./audit-logger";
+
+/**
+ * Overlay table-extracted values onto Claude's result.
+ * Table = ground truth for numbers/dates. Claude = better for structure/text.
+ */
+function mergeTableOntoClaudeResult(
+  tableData: Record<string, unknown>,
+  claudeData: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...claudeData };
+
+  for (const [key, tableValue] of Object.entries(tableData)) {
+    if (tableValue == null || tableValue === "") continue;
+    if (key === "dealDates") continue; // sidecar, not in schema
+
+    const claudeValue = merged[key];
+
+    if (Array.isArray(tableValue)) {
+      // Use whichever array found more items (more complete extraction)
+      if (!Array.isArray(claudeValue) || tableValue.length > claudeValue.length) {
+        merged[key] = tableValue;
+      }
+    } else if (typeof tableValue === "number") {
+      // Table numbers are precise (pdfplumber, no hallucination)
+      merged[key] = tableValue;
+    } else if (typeof tableValue === "string") {
+      // Fill gaps: prefer table if Claude returned nothing
+      if (claudeValue == null || claudeValue === "" || claudeValue === "null") {
+        merged[key] = tableValue;
+      }
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Post-process Claude extraction results by overlaying pdfplumber table data.
+ * Call this AFTER extractAllSections() with the same section results.
+ * Returns enhanced results + audit log. Original results are not mutated.
+ */
+export function enhanceWithTableData(
+  sectionResults: SectionExtractionResult[],
+  tablePages: PageTableData[],
+  documentMap: { sections: Array<{ sectionType: string; pageStart: number; pageEnd: number }> },
+): { enhanced: SectionExtractionResult[]; auditLog: ExtractionAuditLog } {
+  const auditLog = createAuditLog("compliance_report", tablePages.length);
+  const enhanced: SectionExtractionResult[] = [];
+
+  // Build page range lookup from document map
+  const pageRanges = new Map<string, { pageStart: number; pageEnd: number }>();
+  for (const s of documentMap.sections) {
+    pageRanges.set(s.sectionType, { pageStart: s.pageStart, pageEnd: s.pageEnd });
+  }
+
+  // Parse tests first (needed for concentration derivation)
+  let parsedTests: ParsedComplianceTest[] | null = null;
+  const testRange = pageRanges.get("par_value_tests") ?? pageRanges.get("interest_coverage_tests");
+  if (testRange) {
+    const testResult = parseComplianceTestTables(tablePages, testRange.pageStart, testRange.pageEnd);
+    if (testResult.data && testResult.data.length > 0) {
+      parsedTests = testResult.data;
+    }
+  }
+
+  for (const result of sectionResults) {
+    const range = pageRanges.get(result.sectionType);
+    if (!range || !result.data) {
+      enhanced.push(result);
+      continue;
+    }
+
+    const startTime = Date.now();
+    let tableData: Record<string, unknown> | null = null;
+    let recordCount = 0;
+    let quality = 0;
+
+    switch (result.sectionType) {
+      case "compliance_summary": {
+        const parsed = parseComplianceSummaryTables(tablePages, range.pageStart, range.pageEnd);
+        if (parsed.data) {
+          tableData = parsed.data as unknown as Record<string, unknown>;
+          recordCount = parsed.recordCount;
+          quality = parsed.quality;
+        }
+        break;
+      }
+      case "par_value_tests":
+      case "interest_coverage_tests": {
+        if (parsedTests && parsedTests.length > 0) {
+          tableData = {
+            tests: parsedTests.map((t) => ({
+              ...t,
+              cushionPct: null,
+              cushionAmount: null,
+              consequenceIfFail: null,
+            })),
+          };
+          recordCount = parsedTests.length;
+          quality = 0.8;
+        }
+        break;
+      }
+      case "asset_schedule": {
+        const parsed = parseHoldingsTables(tablePages, range.pageStart, range.pageEnd);
+        if (parsed.data && parsed.data.length > 0) {
+          tableData = { holdings: parsed.data };
+          recordCount = parsed.recordCount;
+          quality = parsed.quality;
+        }
+        break;
+      }
+      case "concentration_tables": {
+        if (parsedTests && parsedTests.length > 0) {
+          const parsed = parseConcentrationFromTests(parsedTests);
+          if (parsed.data && parsed.data.length > 0) {
+            tableData = { concentrations: parsed.data };
+            recordCount = parsed.recordCount;
+            quality = parsed.quality;
+          }
+        }
+        break;
+      }
+    }
+
+    if (tableData) {
+      const before = JSON.stringify(result.data);
+      const merged = mergeTableOntoClaudeResult(tableData, result.data);
+      const changed = JSON.stringify(merged) !== before;
+
+      addAuditEntry(auditLog, {
+        sectionType: result.sectionType,
+        method: "table+claude_merged",
+        pagesScanned: `${range.pageStart}-${range.pageEnd}`,
+        recordsExtracted: recordCount,
+        fieldsPerRecord: 0,
+        qualityScore: quality,
+        nullFieldRatio: 0,
+        typeErrors: [],
+        rawSamples: [],
+        dataQualityNotes: changed ? ["table data improved Claude result"] : ["no changes from table overlay"],
+        durationMs: Date.now() - startTime,
+      });
+
+      enhanced.push({ ...result, data: merged });
+    } else {
+      addAuditEntry(auditLog, {
+        sectionType: result.sectionType,
+        method: "claude",
+        pagesScanned: `${range.pageStart}-${range.pageEnd}`,
+        recordsExtracted: 0,
+        fieldsPerRecord: 0,
+        qualityScore: result.data ? 1 : 0,
+        nullFieldRatio: 0,
+        typeErrors: [],
+        rawSamples: [],
+        dataQualityNotes: [],
+        durationMs: Date.now() - startTime,
+      });
+      enhanced.push(result);
+    }
+  }
+
+  logAuditSummary(auditLog);
+  return { enhanced, auditLog };
 }
