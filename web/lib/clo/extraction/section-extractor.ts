@@ -5,7 +5,6 @@ import * as schemas from "./section-schemas";
 import * as prompts from "./section-prompts";
 import type { PageTableData } from "./table-extractor";
 import {
-  parseComplianceSummaryTables,
   parseComplianceTestTables,
   parseHoldingsTables,
   parseConcentrationFromTests,
@@ -127,8 +126,9 @@ Rules:
 
 const TABLE_QUALITY_THRESHOLD = 0.7;
 
+// compliance_summary excluded: Claude handles capital structure + pool metrics well;
+// pdfplumber tranche extraction is fragile with merged-cell BNY Mellon tables.
 const TABLE_ELIGIBLE_SECTIONS = new Set([
-  "compliance_summary",
   "par_value_tests",
   "interest_coverage_tests",
   "asset_schedule",
@@ -146,10 +146,6 @@ function tryTableExtraction(
   if (!TABLE_ELIGIBLE_SECTIONS.has(sectionType)) return null;
 
   switch (sectionType) {
-    case "compliance_summary": {
-      const result = parseComplianceSummaryTables(tablePages, pageStart, pageEnd);
-      return result as TableParseResult<unknown>;
-    }
     case "par_value_tests":
     case "interest_coverage_tests": {
       const result = parseComplianceTestTables(tablePages, pageStart, pageEnd);

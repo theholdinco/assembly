@@ -14,6 +14,7 @@ import { extractPdfText } from "./pdf-text-extractor";
 import { extractPdfTables } from "./table-extractor";
 import { createAuditLog, logAuditSummary } from "./audit-logger";
 import { reconcileDates } from "./date-reconciler";
+import { parseComplianceSummaryTables } from "./table-parser";
 // Common field name aliases the model returns → correct DB column names
 const POOL_SUMMARY_ALIASES: Record<string, string> = {
   aggregate_principal_balance: "total_principal_balance",
@@ -1001,8 +1002,17 @@ export async function runSectionExtraction(
   }
 
   // Phase 3.5: Date reconciliation (if PPM data exists)
-  const complianceSummaryForDates = sections.compliance_summary as Record<string, unknown> | null;
-  const dealDates = (complianceSummaryForDates as any)?.dealDates as Record<string, string | null> | undefined;
+  // Extract deal dates from table page text via regex (independent of Claude's compliance_summary)
+  let dealDates: import("./table-parser").ParsedDealDates | undefined;
+  if (tablePages) {
+    const summarySection = documentMap.sections.find((s) => s.sectionType === "compliance_summary");
+    if (summarySection) {
+      const summaryResult = parseComplianceSummaryTables(tablePages, summarySection.pageStart, summarySection.pageEnd);
+      if (summaryResult.data?.dealDates) {
+        dealDates = summaryResult.data.dealDates;
+      }
+    }
+  }
 
   if (dealDates) {
     await progress("reconciling_dates", "Reconciling dates between PPM and compliance...");
