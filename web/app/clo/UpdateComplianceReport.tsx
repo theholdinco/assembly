@@ -55,7 +55,7 @@ export default function UpdateComplianceReport({ hasPortfolio }: { hasPortfolio:
       for (let i = 0; i < 480; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         try {
-          const pollRes = await fetch("/api/clo/report/extract");
+          const pollRes = await fetch("/api/clo/report/extract", { cache: "no-store" });
           if (pollRes.ok) {
             const data = await pollRes.json();
             if (data.status === "complete") {

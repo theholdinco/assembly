@@ -15,14 +15,14 @@ export default function DocumentUploadBanner({ hasDocuments }: { hasDocuments?: 
   const complianceInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  const pollExtraction = useCallback(async () => {
+  const pollExtraction = useCallback(async (hasCompliancePending?: boolean) => {
     setExtracting(true);
-    setStatusText("Queued — waiting for extraction to start...");
+    setStatusText("Queued — waiting for PPM extraction to start...");
 
     for (let i = 0; i < 480; i++) {
       await new Promise((r) => setTimeout(r, 5000));
 
-      const res = await fetch("/api/clo/profile/extract");
+      const res = await fetch("/api/clo/profile/extract", { cache: "no-store" });
       if (!res.ok) continue;
 
       const data = await res.json();
@@ -35,6 +35,11 @@ export default function DocumentUploadBanner({ hasDocuments }: { hasDocuments?: 
             body: JSON.stringify({ extractedConstraints: data.extractedConstraints }),
           });
         }
+        if (hasCompliancePending) {
+          // PPM done but compliance still pending — don't set done yet
+          setStatusText("PPM extraction complete. Starting compliance extraction...");
+          return;
+        }
         setStatusText("");
         setExtracting(false);
         setDone(true);
@@ -43,7 +48,7 @@ export default function DocumentUploadBanner({ hasDocuments }: { hasDocuments?: 
       }
 
       if (data.status === "error") {
-        setError(data.error || "Extraction failed");
+        setError(data.error || "PPM extraction failed");
         setExtracting(false);
         setStatusText("");
         return;
@@ -57,7 +62,7 @@ export default function DocumentUploadBanner({ hasDocuments }: { hasDocuments?: 
       }
     }
 
-    setError("Extraction timed out. Check back later.");
+    setError("PPM extraction timed out. Check back later.");
     setExtracting(false);
     setStatusText("");
   }, [router]);
@@ -118,35 +123,26 @@ export default function DocumentUploadBanner({ hasDocuments }: { hasDocuments?: 
 
     // Queue compliance report extraction + portfolio extraction
     if (hadCompliance) {
-      setExtracting(true);
-      setStatusText("Extracting compliance data (this may take several minutes)...");
-      fetch("/api/clo/report/extract", { method: "POST" })
-        .then(async (res) => {
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            setError(data.error || "Report extraction failed");
-          }
-        })
-        .catch(() => {});
+      await fetch("/api/clo/report/extract", { method: "POST" });
       fetch("/api/clo/profile/extract-portfolio", { method: "POST" }).catch(() => {});
     }
 
-    // Start polling for PPM extraction completion
+    // Poll extractions sequentially: PPM first, then compliance
     if (hadPpm) {
-      pollExtraction();
-    } else if (hadCompliance) {
-      // Poll for compliance extraction by checking report periods
-      pollComplianceExtraction();
+      await pollExtraction(hadCompliance);
+    }
+    if (hadCompliance) {
+      await pollComplianceExtraction();
     }
   }
 
   async function pollComplianceExtraction() {
     setExtracting(true);
-    setStatusText("Queued — waiting for extraction to start...");
+    setStatusText("Queued — waiting for compliance extraction to start...");
     for (let i = 0; i < 480; i++) {
       await new Promise((r) => setTimeout(r, 5000));
       try {
-        const res = await fetch("/api/clo/report/extract");
+        const res = await fetch("/api/clo/report/extract", { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
           if (data.status === "complete") {
