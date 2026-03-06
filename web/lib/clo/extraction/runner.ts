@@ -818,12 +818,22 @@ async function runSingleExtractionPass(
     console.warn(`${label} pdfplumber failed, falling back to Claude vision: ${(err as Error).message}`);
     sectionTexts = await extractAllSectionTexts(apiKey, pdfDoc, documentMap);
   }
-  console.log(`${label} text extracted for ${sectionTexts.filter((t) => t.markdown.length > 0).length} sections`);
+  const nonEmpty = sectionTexts.filter((t) => t.markdown.trim().length >= 50);
+  const skipped = sectionTexts.filter((t) => t.markdown.trim().length < 50);
+  if (skipped.length > 0) {
+    console.warn(`${label} skipping ${skipped.length} sections with insufficient text: ${skipped.map((s) => s.sectionType).join(", ")}`);
+  }
+  console.log(`${label} text extracted for ${nonEmpty.length}/${sectionTexts.length} sections`);
 
   // Phase 3: Extract structured data per section
-  const MULTI_PASS_TEMPERATURE = 0.2;
-  let sectionResults = await extractAllSections(apiKey, sectionTexts, documentMap.documentType, 3, MULTI_PASS_TEMPERATURE);
-  console.log(`${label} extracted ${sectionResults.filter((r) => r.data != null).length}/${sectionResults.length} sections`);
+  const MULTI_PASS_TEMPERATURE = 0;
+  let sectionResults = await extractAllSections(apiKey, nonEmpty, documentMap.documentType, 3, MULTI_PASS_TEMPERATURE);
+  const successCount = sectionResults.filter((r) => r.data != null).length;
+  const failedSections = sectionResults.filter((r) => r.data == null).map((r) => r.sectionType);
+  console.log(`${label} extracted ${successCount}/${sectionResults.length} sections`);
+  if (failedSections.length > 0) {
+    console.warn(`${label} FAILED sections: ${failedSections.join(", ")}`);
+  }
 
   // Phase 3.5: Enhance with pdfplumber table data (compliance only)
   let extractionAuditLog: import("./audit-logger").ExtractionAuditLog | undefined;

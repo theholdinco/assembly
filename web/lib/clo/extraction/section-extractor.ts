@@ -126,6 +126,12 @@ export async function extractSection(
     return { sectionType: sectionText.sectionType, data: null, truncated: false, error: `Unknown section type: ${sectionText.sectionType}` };
   }
 
+  // Skip extraction if markdown is empty — guaranteed to return null
+  if (!sectionText.markdown || sectionText.markdown.trim().length < 50) {
+    console.warn(`[section-extractor] ${sectionText.sectionType}: skipping — markdown too short (${sectionText.markdown?.length ?? 0} chars)`);
+    return { sectionType: sectionText.sectionType, data: null, truncated: false, error: "Empty or insufficient markdown" };
+  }
+
   const prompt = config.prompt();
   const tool = {
     name: `extract_${sectionText.sectionType}`,
