@@ -127,10 +127,12 @@ function summarizeDealContext(ctx: Record<string, any>): string {
 
   // Tranches — compact summary
   const tranches = ctx.tranches as any[] | undefined;
+  const trancheById = new Map<string, any>();
   if (tranches && tranches.length > 0) {
     parts.push(`\nTranches (${tranches.length}):`);
     for (const t of tranches) {
-      parts.push(`  ${t.className ?? "?"}: balance=${t.currentBalance ?? "NULL"}, spread=${t.spreadBps ?? "NULL"}bps, rate=${t.interestRate ?? "NULL"}%, rank=${t.seniorityRank ?? "?"}`);
+      trancheById.set(t.id, t);
+      parts.push(`  ${t.className ?? "?"}: balance=${t.originalBalance ?? "NULL"}, spread=${t.spreadBps ?? "NULL"}bps, floating=${t.isFloating ?? "?"}, rank=${t.seniorityRank ?? "?"}, isIncomeNote=${t.isIncomeNote ?? "?"}`);
     }
   } else {
     parts.push("\nTranches: NONE");
@@ -141,7 +143,8 @@ function summarizeDealContext(ctx: Record<string, any>): string {
   if (snaps && snaps.length > 0) {
     parts.push(`\nTranche Snapshots (${snaps.length}):`);
     for (const s of snaps) {
-      parts.push(`  ${s.className ?? "?"}: beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}`);
+      const trancheName = trancheById.get(s.trancheId)?.className ?? s.trancheId ?? "?";
+      parts.push(`  ${trancheName}: curBal=${s.currentBalance ?? "NULL"}, beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}`);
     }
   } else {
     parts.push("\nTranche Snapshots: NONE");
