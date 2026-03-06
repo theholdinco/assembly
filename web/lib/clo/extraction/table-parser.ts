@@ -201,6 +201,23 @@ function extractPoolMetrics(text: string): Pick<ParsedComplianceSummary, "totalP
   };
 }
 
+/** Detect column mapping from a header row for capital structure tables */
+function detectTrancheColumnMap(row: string[]): Record<string, number> | null {
+  const map: Record<string, number> = {};
+  let foundAny = false;
+  for (let i = 0; i < row.length; i++) {
+    const cell = (row[i] ?? "").toLowerCase().trim();
+    if (/original.*balance|principal.*amount|notional/i.test(cell)) { map.principalAmount = i; foundAny = true; }
+    else if (/current.*balance|outstanding/i.test(cell)) { map.currentBalance = i; foundAny = true; }
+    else if (/spread.*bps|spread/i.test(cell)) { map.spread = i; foundAny = true; }
+    else if (/coupon.*rate|coupon/i.test(cell)) { map.couponRate = i; foundAny = true; }
+    else if (/all.in.*rate/i.test(cell)) { map.allInRate = i; foundAny = true; }
+    else if (/rating/i.test(cell)) { map.rating = i; foundAny = true; }
+    else if (/maturity/i.test(cell)) { map.maturityDate = i; foundAny = true; }
+  }
+  return foundAny ? map : null;
+}
+
 export function parseComplianceSummaryTables(
   allPages: PageTableData[],
   startPage: number,
@@ -212,20 +229,44 @@ export function parseComplianceSummaryTables(
   const tranches: ParsedComplianceSummary["tranches"] = [];
 
   for (const { table } of pageTables) {
+    // Try to detect column mapping from header row
+    let colMap: Record<string, number> | null = null;
+    for (const row of table.rows) {
+      const detected = detectTrancheColumnMap(row);
+      if (detected && Object.keys(detected).length >= 2) {
+        colMap = detected;
+        break;
+      }
+    }
+
     for (const row of table.rows) {
       if (row.length < 3) continue;
       const firstCell = row[0]?.trim() ?? "";
 
       if (/^(Class|Senior|Subordinated)/i.test(firstCell)) {
-        tranches.push({
-          className: firstCell,
-          principalAmount: parseNumber(row[1]),
-          currentBalance: parseNumber(row[2]),
-          couponRate: parsePercent(row[3]),
-          spread: parseNumber(row[4]),
-          rating: row.length > 6 ? (row[6]?.trim() || null) : null,
-          maturityDate: row.length > 13 ? parseDate(row[13]) : null,
-        });
+        if (colMap) {
+          // Header-aware mapping
+          tranches.push({
+            className: firstCell,
+            principalAmount: colMap.principalAmount != null ? parseNumber(row[colMap.principalAmount]) : null,
+            currentBalance: colMap.currentBalance != null ? parseNumber(row[colMap.currentBalance]) : null,
+            couponRate: colMap.couponRate != null ? parsePercent(row[colMap.couponRate]) : (colMap.allInRate != null ? parsePercent(row[colMap.allInRate]) : null),
+            spread: colMap.spread != null ? parseNumber(row[colMap.spread]) : null,
+            rating: colMap.rating != null ? (row[colMap.rating]?.trim() || null) : null,
+            maturityDate: colMap.maturityDate != null ? parseDate(row[colMap.maturityDate]) : null,
+          });
+        } else {
+          // Fallback: hardcoded positions
+          tranches.push({
+            className: firstCell,
+            principalAmount: parseNumber(row[1]),
+            currentBalance: parseNumber(row[2]),
+            couponRate: parsePercent(row[3]),
+            spread: parseNumber(row[4]),
+            rating: row.length > 6 ? (row[6]?.trim() || null) : null,
+            maturityDate: row.length > 13 ? parseDate(row[13]) : null,
+          });
+        }
       }
     }
   }
@@ -360,6 +401,24 @@ function detectAssetTypeFromText(pageText: string): string | null {
   return null;
 }
 
+/** Detect column mapping from a header row for holdings tables */
+function detectHoldingsColumnMap(row: string[]): Record<string, number> | null {
+  const map: Record<string, number> = {};
+  let foundAny = false;
+  for (let i = 0; i < row.length; i++) {
+    const cell = (row[i] ?? "").toLowerCase().trim();
+    if (/obligor|issuer|borrower|name/i.test(cell) && i === 0) { map.obligor = i; }
+    else if (/security.*id|isin|cusip|identifier/i.test(cell)) { map.securityId = i; foundAny = true; }
+    else if (/market.*price|price/i.test(cell)) { map.marketPrice = i; foundAny = true; }
+    else if (/par.*balance|par.*amount|par\b/i.test(cell)) { map.parBalance = i; foundAny = true; }
+    else if (/principal.*balance|principal/i.test(cell)) { map.principalBalance = i; foundAny = true; }
+    else if (/unfunded|commitment/i.test(cell)) { map.unfundedAmount = i; foundAny = true; }
+    else if (/security.*level|lien|seniority/i.test(cell)) { map.securityLevel = i; foundAny = true; }
+    else if (/maturity/i.test(cell)) { map.maturityDate = i; foundAny = true; }
+  }
+  return foundAny ? map : null;
+}
+
 export function parseHoldingsTables(
   allPages: PageTableData[],
   startPage: number,
@@ -368,6 +427,7 @@ export function parseHoldingsTables(
   const holdings: ParsedHolding[] = [];
   const seen = new Set<string>();
   let currentAssetType: string | null = "Term Loan";
+  let colMap: Record<string, number> | null = null;
 
   for (const p of allPages) {
     if (p.page < startPage || p.page > endPage) continue;
@@ -376,30 +436,58 @@ export function parseHoldingsTables(
     if (detectedType) currentAssetType = detectedType;
 
     for (const table of p.tables) {
+      // Try to detect column mapping from header row (first row or any row matching header patterns)
+      if (!colMap) {
+        for (const row of table.rows) {
+          const detected = detectHoldingsColumnMap(row);
+          if (detected && Object.keys(detected).length >= 2) {
+            colMap = detected;
+            break;
+          }
+        }
+      }
+
       for (const row of table.rows) {
         if (row.length < 5) continue;
 
-        const obligor = row[0]?.trim() ?? "";
+        const obligor = row[colMap?.obligor ?? 0]?.trim() ?? "";
         if (obligor.length < 3) continue;
         if (isHeaderRow(row)) continue;
         if (/^(total|sub-?total|grand total)/i.test(obligor)) continue;
 
-        const secId = row[1]?.trim() ?? "";
+        const secIdIdx = colMap?.securityId ?? 1;
+        const secId = row[secIdIdx]?.trim() ?? "";
         const dedupKey = `${obligor.toLowerCase()}|${secId.toLowerCase()}`;
         if (seen.has(dedupKey)) continue;
         seen.add(dedupKey);
 
-        holdings.push({
-          obligorName: obligor,
-          securityId: secId || null,
-          assetType: currentAssetType,
-          marketPrice: parseNumber(row[3]),
-          parBalance: parseNumber(row[4]),
-          principalBalance: parseNumber(row[5]),
-          unfundedAmount: parseNumber(row[6]),
-          securityLevel: row[7]?.trim() || null,
-          maturityDate: parseDate(row[8]),
-        });
+        if (colMap) {
+          // Header-aware mapping
+          holdings.push({
+            obligorName: obligor,
+            securityId: secId || null,
+            assetType: currentAssetType,
+            marketPrice: colMap.marketPrice != null ? parseNumber(row[colMap.marketPrice]) : null,
+            parBalance: colMap.parBalance != null ? parseNumber(row[colMap.parBalance]) : null,
+            principalBalance: colMap.principalBalance != null ? parseNumber(row[colMap.principalBalance]) : null,
+            unfundedAmount: colMap.unfundedAmount != null ? parseNumber(row[colMap.unfundedAmount]) : null,
+            securityLevel: colMap.securityLevel != null ? (row[colMap.securityLevel]?.trim() || null) : null,
+            maturityDate: colMap.maturityDate != null ? parseDate(row[colMap.maturityDate]) : null,
+          });
+        } else {
+          // Fallback: hardcoded positions
+          holdings.push({
+            obligorName: obligor,
+            securityId: secId || null,
+            assetType: currentAssetType,
+            marketPrice: parseNumber(row[3]),
+            parBalance: parseNumber(row[4]),
+            principalBalance: parseNumber(row[5]),
+            unfundedAmount: parseNumber(row[6]),
+            securityLevel: row[7]?.trim() || null,
+            maturityDate: parseDate(row[8]),
+          });
+        }
       }
     }
   }
