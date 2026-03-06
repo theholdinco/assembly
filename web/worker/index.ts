@@ -567,6 +567,18 @@ function parseAmount(s: string | undefined | null): number | null {
   return isNaN(n) ? null : n;
 }
 
+function parseSpreadBps(s: string | undefined | null): number | null {
+  if (!s) return null;
+  // Match patterns like "SOFR + 145bps", "E + 1.50%", "145 bps", "1.45%"
+  const bpsMatch = String(s).match(/(\d+(?:\.\d+)?)\s*bps/i);
+  if (bpsMatch) return parseFloat(bpsMatch[1]);
+  const pctMatch = String(s).match(/[+]\s*(\d+(?:\.\d+)?)\s*%/);
+  if (pctMatch) return parseFloat(pctMatch[1]) * 100;
+  const perCentMatch = String(s).match(/(\d+(?:\.\d+)?)\s*per\s*cent/i);
+  if (perCentMatch) return parseFloat(perCentMatch[1]) * 100;
+  return null;
+}
+
 async function syncPpmToRelationalTables(
   profileId: string,
   extractedConstraints: Record<string, unknown>,
@@ -623,9 +635,10 @@ async function syncPpmToRelationalTables(
     const values: unknown[] = [];
     let pi = 1;
 
-    if (entry.spreadBps != null) {
+    const spreadBps = entry.spreadBps ?? parseSpreadBps(entry.spread);
+    if (spreadBps != null) {
       setClauses.push(`spread_bps = $${pi++}`);
-      values.push(entry.spreadBps);
+      values.push(spreadBps);
     }
 
     const balance = parseAmount(entry.principalAmount);

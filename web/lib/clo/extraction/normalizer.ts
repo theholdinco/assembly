@@ -302,7 +302,18 @@ export function normalizeSectionResults(
     const rawHoldings = as_.holdings as Array<Record<string, unknown>> | undefined;
     if (rawHoldings && rawHoldings.length > 0) {
       const deduped = deduplicateHoldings(rawHoldings as any);
-      holdings = deduped.map((h) => toDbRow(h as Record<string, unknown>, base));
+      holdings = deduped.map((h) => {
+        const row = toDbRow(h as Record<string, unknown>, base);
+        // Fallback: principal_balance → par_balance if par_balance missing
+        if (row.par_balance == null && row.principal_balance != null) {
+          row.par_balance = row.principal_balance;
+        }
+        // Fallback: market_value → par_balance as last resort
+        if (row.par_balance == null && row.market_value != null) {
+          row.par_balance = row.market_value;
+        }
+        return row;
+      });
     }
   }
 
