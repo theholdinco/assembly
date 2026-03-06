@@ -670,6 +670,8 @@ async function syncPpmToRelationalTables(
     setClauses.push(`is_income_note = $${pi++}`);
     values.push(!!isSub);
 
+    console.log(`[worker] syncPpm: tranche "${entry.class}" → normalized="${normalizedName}", spreadBps=${spreadBps}, balance=${balance}, isSub=${isSub}, isFloating=${entry.rateType}`);
+
     if (entry.deferrable != null) {
       setClauses.push(`is_deferrable = $${pi++}`);
       values.push(entry.deferrable);
@@ -699,6 +701,28 @@ async function syncPpmToRelationalTables(
         `UPDATE clo_tranches SET ${setClauses.join(", ")} WHERE id = $${pi}`,
         values,
       );
+    }
+  }
+
+  // Clean up duplicate tranches that now normalize to the same name (from pre-alias-fix runs)
+  const allTranchesFinal = await pool.query<{ id: string; class_name: string }>(
+    "SELECT id, class_name FROM clo_tranches WHERE deal_id = $1 ORDER BY id",
+    [dealId],
+  );
+  const seenNorm = new Map<string, string>(); // normalizedName → first tranche id
+  for (const t of allTranchesFinal.rows) {
+    const norm = normalizeClassName(t.class_name);
+    if (seenNorm.has(norm)) {
+      // Duplicate — reassign snapshots then delete
+      const keepId = seenNorm.get(norm)!;
+      await pool.query(
+        "UPDATE clo_tranche_snapshots SET tranche_id = $1 WHERE tranche_id = $2",
+        [keepId, t.id],
+      );
+      await pool.query("DELETE FROM clo_tranches WHERE id = $1", [t.id]);
+      console.log(`[worker] syncPpm: removed duplicate tranche "${t.class_name}" (${t.id}), kept ${keepId}`);
+    } else {
+      seenNorm.set(norm, t.id);
     }
   }
 
