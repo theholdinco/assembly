@@ -1174,6 +1174,100 @@ export async function runSectionExtraction(
     }
   }
 
+  // Enrich tranches with PPM data (spread, is_floating, is_income_note, seniority_rank)
+  // This handles the case where PPM extraction ran before the deal existed
+  try {
+    const profileRows = await query<{ extracted_constraints: Record<string, unknown> }>(
+      "SELECT extracted_constraints FROM clo_profiles WHERE id = $1",
+      [profileId],
+    );
+    const ppmConstraints = profileRows[0]?.extracted_constraints;
+    const capitalStructure = (ppmConstraints?.capitalStructure ?? []) as Array<Record<string, unknown>>;
+    if (capitalStructure.length > 0) {
+      console.log(`[extraction] enriching ${capitalStructure.length} tranches from PPM constraints`);
+      // Sort: non-subordinated first
+      const sorted = [...capitalStructure].sort((a, b) => {
+        const aSub = !!(a.isSubordinated ?? /\b(sub|equity|income|residual)\b/i.test(String(a.class ?? "")));
+        const bSub = !!(b.isSubordinated ?? /\b(sub|equity|income|residual)\b/i.test(String(b.class ?? "")));
+        return aSub === bSub ? 0 : aSub ? 1 : -1;
+      });
+      for (let i = 0; i < sorted.length; i++) {
+        const entry = sorted[i];
+        const entryClass = String(entry.class ?? "");
+        const normalizedName = normalizeClassName(entryClass);
+        const allTranches = await query<{ id: string; class_name: string; spread_bps: number | null }>(
+          "SELECT id, class_name, spread_bps FROM clo_tranches WHERE deal_id = $1",
+          [dealId],
+        );
+        const match = allTranches.find((t) => normalizeClassName(t.class_name) === normalizedName);
+        if (!match) continue;
+
+        const setClauses: string[] = [];
+        const values: unknown[] = [];
+        let pi = 1;
+
+        // Parse spread from PPM
+        let spreadBps = (entry.spreadBps as number | null) ?? null;
+        if (spreadBps == null && entry.spread) {
+          const spreadStr = String(entry.spread);
+          const bpsMatch = spreadStr.match(/(\d+(?:\.\d+)?)\s*bps/i);
+          if (bpsMatch) spreadBps = parseFloat(bpsMatch[1]);
+          else {
+            const plain = parseFloat(spreadStr.replace(/[,\s]/g, ""));
+            if (!isNaN(plain) && plain > 0) spreadBps = plain;
+          }
+        }
+        if (spreadBps != null && spreadBps > 0 && spreadBps < 20) {
+          spreadBps = Math.round(spreadBps * 100);
+        }
+        if (spreadBps != null) {
+          setClauses.push(`spread_bps = COALESCE(spread_bps, $${pi++})`);
+          values.push(spreadBps);
+        }
+
+        // Set is_floating
+        if (entry.rateType) {
+          setClauses.push(`is_floating = COALESCE(is_floating, $${pi++})`);
+          values.push(String(entry.rateType).toLowerCase() === "floating");
+        }
+
+        // Set seniority_rank
+        setClauses.push(`seniority_rank = COALESCE(seniority_rank, $${pi++})`);
+        values.push(i + 1);
+
+        // Set is_subordinate and is_income_note
+        const isSub = !!(entry.isSubordinated ??
+          /\b(sub|equity|income|residual)\b/i.test(entryClass) ??
+          /\b(sub|equity|income|residual)\b/i.test(String(entry.designation ?? "")));
+        setClauses.push(`is_subordinate = COALESCE(is_subordinate, $${pi++})`);
+        values.push(isSub);
+        setClauses.push(`is_income_note = COALESCE(is_income_note, $${pi++})`);
+        values.push(isSub);
+
+        // Set original_balance
+        if (entry.principalAmount) {
+          const cleaned = String(entry.principalAmount).replace(/[^0-9.]/g, "");
+          const bal = parseFloat(cleaned);
+          if (!isNaN(bal) && bal > 0) {
+            setClauses.push(`original_balance = COALESCE(original_balance, $${pi++})`);
+            values.push(bal);
+          }
+        }
+
+        if (setClauses.length > 0) {
+          values.push(match.id);
+          await query(
+            `UPDATE clo_tranches SET ${setClauses.join(", ")} WHERE id = $${pi}`,
+            values,
+          );
+          console.log(`[extraction] enriched tranche "${entryClass}": spreadBps=${spreadBps}, rank=${i + 1}, isSub=${isSub}`);
+        }
+      }
+    }
+  } catch (enrichErr) {
+    console.error(`[extraction] PPM tranche enrichment failed:`, enrichErr instanceof Error ? enrichErr.message : enrichErr);
+  }
+
   // Phase 3.75: Date reconciliation (if PPM data + compliance dates available)
   if (tablePagesForDates) {
     try {

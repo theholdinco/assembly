@@ -590,14 +590,41 @@ async function syncPpmToRelationalTables(
 ) {
   const isNullish = (v: unknown) => v == null || v === "null";
 
-  // Look up deal_id
-  const deals = await pool.query<{ id: string }>(
+  // Look up or create deal
+  let deals = await pool.query<{ id: string }>(
     "SELECT id FROM clo_deals WHERE profile_id = $1",
     [profileId],
   );
   if (deals.rows.length === 0) {
-    console.log(`[worker] syncPpm: no deal found for profile ${profileId}, skipping`);
-    return;
+    // Deal doesn't exist yet (PPM extraction ran before compliance report).
+    // Create it from the extracted constraints so tranches can be linked.
+    const di = (extractedConstraints.dealIdentity ?? {}) as Record<string, string>;
+    const kd = (extractedConstraints.keyDates ?? {}) as Record<string, string>;
+    const cm = (extractedConstraints.cmDetails ?? {}) as Record<string, string>;
+    deals = await pool.query<{ id: string }>(
+      `INSERT INTO clo_deals (
+        profile_id, deal_name, issuer_legal_entity, jurisdiction, deal_currency,
+        closing_date, effective_date, reinvestment_period_end, non_call_period_end,
+        stated_maturity_date, collateral_manager, governing_law, ppm_constraints
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING id`,
+      [
+        profileId,
+        di.dealName ?? null,
+        di.issuerLegalName ?? null,
+        di.jurisdiction ?? null,
+        di.currency ?? null,
+        kd.originalIssueDate ?? null,
+        kd.currentIssueDate ?? null,
+        kd.reinvestmentPeriodEnd ?? null,
+        kd.nonCallPeriodEnd ?? null,
+        kd.maturityDate ?? null,
+        cm.name ?? (extractedConstraints.collateralManager as string) ?? null,
+        di.governingLaw ?? null,
+        JSON.stringify(extractedConstraints),
+      ],
+    );
+    console.log(`[worker] syncPpm: created deal ${deals.rows[0].id} for profile ${profileId}`);
   }
   const dealId = deals.rows[0].id;
 
