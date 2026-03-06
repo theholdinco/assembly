@@ -399,12 +399,13 @@ def generate():
     aligns = ["L", "C", "R", "R", "R", "R", "R", "C"]
     pdf.table_header(cols, widths)
 
-    ic_triggers = {"A": 120.0, "B": 115.0, "C": 110.0, "D": 105.0}
+    ic_triggers = {"A": 120.0, "B": 115.0, "C": 110.0, "D": 105.0, "E": 103.0}
     ic_denoms_map = {
         "A": sum(t["original"] * (BASE_RATE + t["spread_bps"] / 100) / 100 / 4 for t in TRANCHES if t["class"] in ("A-1", "A-2")),
         "B": sum(t["original"] * (BASE_RATE + t["spread_bps"] / 100) / 100 / 4 for t in TRANCHES if t["class"] in ("A-1", "A-2", "B")),
         "C": sum(t["original"] * (BASE_RATE + t["spread_bps"] / 100) / 100 / 4 for t in TRANCHES if t["class"] in ("A-1", "A-2", "B", "C")),
         "D": sum(t["original"] * (BASE_RATE + t["spread_bps"] / 100) / 100 / 4 for t in TRANCHES if t["class"] in ("A-1", "A-2", "B", "C", "D")),
+        "E": sum(t["original"] * (BASE_RATE + t["spread_bps"] / 100) / 100 / 4 for t in TRANCHES if t["class"] in ("A-1", "A-2", "B", "C", "D", "E")),
     }
     for cls, trigger in ic_triggers.items():
         denom = ic_denoms_map[cls]
@@ -452,8 +453,8 @@ def generate():
     pdf.add_page()
     pdf.section_title("V. SCHEDULE OF INVESTMENTS")
 
-    cols_h = ["Obligor", "Facility", "ISIN", "Maturity", "Par Balance", "Price", "Spread (bps)", "Moody's", "S&P"]
-    widths_h = [32, 24, 26, 20, 24, 14, 14, 14, 14]
+    cols_h = ["Obligor", "ISIN", "Industry", "Maturity", "Par Balance", "Price", "Spread", "Moody's", "S&P"]
+    widths_h = [30, 24, 22, 20, 24, 14, 14, 14, 14]
     aligns_h = ["L", "L", "L", "C", "R", "R", "C", "C", "C"]
 
     pdf.sub_title("Portfolio Holdings")
@@ -465,31 +466,33 @@ def generate():
             pdf.table_header(cols_h, widths_h)
         spread_str = str(h["spread_bps"]) if h["spread_bps"] else "N/A"
         pdf.table_row([
-            h["obligor"][:18], h["facility"][:14], h["isin"], h["maturity"],
+            h["obligor"][:18], h["isin"], h["industry"][:14], h["maturity"],
             fmt_dollars(h["par"]), f"{h['price']:.2f}", spread_str, h["moodys"], h["sp"]
         ], widths_h, aligns_h)
 
-    # Detail table
-    pdf.ln(4)
-    pdf.sub_title("Holdings Detail - Additional Fields")
-    cols_d = ["Obligor", "Industry", "Country", "Cov-Lite", "Fixed", "All-in Rate", "Recovery", "Sec Lien"]
-    widths_d = [32, 28, 16, 16, 14, 22, 20, 20]
-    aligns_d = ["L", "L", "C", "C", "C", "R", "R", "C"]
-    pdf.table_header(cols_d, widths_d)
+    # ── Tranche Payment Summary ──
+    pdf.add_page()
+    pdf.section_title("V-B. TRANCHE PAYMENT SUMMARY")
 
-    for h in HOLDINGS:
-        if pdf.get_y() > 260:
-            pdf.add_page()
-            pdf.table_header(cols_d, widths_d)
-        if h["fixed"]:
-            rate_str = "7.50%"
+    pdf.sub_title("Note Balances and Payments - Current Period")
+    cols_tp = ["Class", "Beginning Balance", "Interest Paid", "Principal Paid", "Ending Balance"]
+    widths_tp = [24, 36, 34, 34, 36]
+    aligns_tp = ["C", "R", "R", "R", "R"]
+    pdf.table_header(cols_tp, widths_tp)
+
+    for t in TRANCHES:
+        beginning = t["original"]
+        if t["spread_bps"] is not None:
+            rate = (BASE_RATE + t["spread_bps"] / 100) / 100
+            interest = t["original"] * rate / 4
         else:
-            rate_str = f"{(BASE_RATE + (h['spread_bps'] or 0) / 100):.2f}%"
+            interest = 0
+        principal_paid = 0  # No amortization in first period
+        ending = beginning - principal_paid
         pdf.table_row([
-            h["obligor"][:18], h["industry"][:16], h["country"],
-            "Yes" if h["cov_lite"] else "No", "Yes" if h["fixed"] else "No",
-            rate_str, f"{h['recovery']:.0f}%", "Yes" if h["second_lien"] else "No"
-        ], widths_d, aligns_d)
+            t["class"], fmt_dollars(beginning), fmt_dollars(round(interest)),
+            fmt_dollars(principal_paid), fmt_dollars(ending)
+        ], widths_tp, aligns_tp)
 
     # ── Concentrations ──
     pdf.add_page()

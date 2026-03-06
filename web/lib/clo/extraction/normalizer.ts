@@ -14,6 +14,41 @@ function toDbRow(obj: Record<string, unknown>, extraFields?: Record<string, unkn
   return row;
 }
 
+type TrancheSnapshot = { className: string; data: Record<string, unknown> };
+
+/** Merge tranche snapshots from compliance_summary and waterfall by className.
+ *  Compliance has current_balance/coupon_rate; waterfall has beginning/ending/interest/principal. */
+function mergeTrancheSnapshots(
+  compliance: TrancheSnapshot[],
+  waterfall: TrancheSnapshot[],
+): TrancheSnapshot[] {
+  if (waterfall.length === 0) return compliance;
+  if (compliance.length === 0) return waterfall;
+
+  const norm = (n: string) => n.replace(/^class(es)?\s+/i, "").replace(/[\s\-]+/g, "").toLowerCase();
+  const byName = new Map<string, TrancheSnapshot>();
+
+  for (const ts of compliance) {
+    byName.set(norm(ts.className), { className: ts.className, data: { ...ts.data } });
+  }
+  for (const ts of waterfall) {
+    const key = norm(ts.className);
+    const existing = byName.get(key);
+    if (existing) {
+      // Merge waterfall fields into existing — waterfall fills gaps, doesn't overwrite
+      for (const [k, v] of Object.entries(ts.data)) {
+        if (v != null && existing.data[k] == null) {
+          existing.data[k] = v;
+        }
+      }
+    } else {
+      byName.set(key, { className: ts.className, data: { ...ts.data } });
+    }
+  }
+
+  return Array.from(byName.values());
+}
+
 /** Normalize class name for dedup: "Class A/B" → "a/b", "A/B" → "a/b" */
 function normalizeTestClass(name: string): string {
   return name
@@ -349,8 +384,9 @@ export function normalizeSectionResults(
     }
   }
 
-  // Merge trancheSnapshots from compliance_summary and waterfall
-  const trancheSnapshots = [...complianceTranches, ...waterfallTranches];
+  // Merge trancheSnapshots from compliance_summary and waterfall by className
+  // (compliance_summary has current_balance/coupon_rate, waterfall has beginning/ending/interest/principal)
+  const trancheSnapshots = mergeTrancheSnapshots(complianceTranches, waterfallTranches);
 
   // 7. trading_activity → trades + tradingSummary
   let trades: Record<string, unknown>[] = [];
