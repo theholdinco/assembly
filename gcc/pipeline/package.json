@@ -6,6 +6,7 @@
   "scripts": {
     "seed": "tsx src/seed.ts",
     "research": "tsx src/research.ts",
+    "extract": "tsx src/extract.ts",
     "resolve": "tsx src/resolve.ts",
     "export": "tsx src/export.ts",
     "pipeline": "tsx src/index.ts",
