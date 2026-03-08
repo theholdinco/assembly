@@ -1,0 +1,6 @@
+pipeline/data/ansab.db
+pipeline/node_modules/
+pipeline/dist/
+web/node_modules/
+web/dist/
+.env

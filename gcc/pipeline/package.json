@@ -1,0 +1,24 @@
+{
+  "name": "ansab-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "tsx src/seed.ts",
+    "research": "tsx src/research.ts",
+    "resolve": "tsx src/resolve.ts",
+    "export": "tsx src/export.ts",
+    "pipeline": "tsx src/index.ts",
+    "db:reset": "rm -f data/ansab.db && tsx src/db/init.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
