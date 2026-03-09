@@ -146,6 +146,9 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 <span className={`${BADGE_CONFIG[entity.type].className} text-xs px-2 py-0.5 rounded-full font-medium`}>
                   {BADGE_CONFIG[entity.type].label}
                 </span>
+                {entity.type === 'family' && (entity.data as any).entityClassification === 'tribe+family' && (
+                  <span className="badge-tribe text-xs px-2 py-0.5 rounded-full font-medium ml-1">Tribe</span>
+                )}
                 <h2 className="font-display text-3xl font-bold text-text mt-2">
                   {getName(entity)}
                 </h2>
@@ -217,18 +220,45 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
 
               {entity.type === 'family' && entity.data.notableFigures.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="font-display text-lg font-semibold text-text mb-2">Notable Figures</h3>
-                  <div className="space-y-2">
-                    {entity.data.notableFigures.slice(0, 8).map((fig) => (
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">
+                    Notable Figures
+                    <span className="text-sm font-normal text-text-tertiary ml-2">
+                      ({entity.data.notableFigures.length})
+                    </span>
+                  </h3>
+                  <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
+                    {entity.data.notableFigures.map((fig) => (
                       <button
                         key={fig.id}
                         onClick={() => { onClose(); navigate(`/figure/${fig.id}`); }}
-                        className="flex items-center gap-2 text-sm text-text hover:text-accent-hover transition-colors"
+                        className="w-full text-left p-2 rounded-lg hover:bg-bg-subtle transition-colors"
                       >
-                        <span className="w-2 h-2 rounded-full bg-plum" />
-                        <span>{fig.name}</span>
-                        {fig.roleDescription && <span className="text-xs text-text-tertiary">({fig.roleDescription})</span>}
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-plum flex-shrink-0" />
+                          <span className="text-sm font-medium text-text">{fig.name}</span>
+                        </div>
+                        {fig.title && (
+                          <p className="text-xs text-text-tertiary ml-4 mt-0.5">{fig.title}</p>
+                        )}
+                        {'biography' in fig && fig.biography && (
+                          <p className="text-xs text-text-secondary ml-4 mt-1 line-clamp-2">{fig.biography}</p>
+                        )}
                       </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {entity.type === 'family' && (entity.data as any).relations?.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">Relations</h3>
+                  <div className="space-y-2">
+                    {(entity.data as any).relations.slice(0, 12).map((rel: any, i: number) => (
+                      <div key={i} className="flex items-center gap-2 text-sm text-text">
+                        <span className="w-2 h-2 rounded-full bg-accent" />
+                        <span>{rel.tribeId?.replace(/_/g, ' ')}</span>
+                        {rel.type && <span className="text-xs text-text-tertiary">({rel.type})</span>}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -238,9 +268,12 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
 
               {/* Navigation buttons */}
               <div className="flex gap-2 flex-wrap">
-                {(entity.type === 'tribe' || entity.type === 'region' || entity.type === 'ethnic') && (
+                {(entity.type === 'tribe' || entity.type === 'family' || entity.type === 'region' || entity.type === 'ethnic') && (
                   <button
-                    onClick={() => { onClose(); navigate('/map'); }}
+                    onClick={() => {
+                      onClose();
+                      navigate(`/map?entity=${entity.type}:${entity.data.id}`);
+                    }}
                     className="px-4 py-2 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
                   >
                     Show in Map

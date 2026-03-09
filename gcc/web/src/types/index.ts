@@ -1,3 +1,31 @@
+// --- Shared enrichment types ---
+
+export interface MigrationStep {
+  year: number | null;
+  endYear: number | null;
+  from: string;
+  fromCoords: [number, number] | null; // [lat, lng]
+  to: string;
+  toCoords: [number, number] | null;
+  description: string;
+}
+
+export interface TimelineEvent {
+  year: number;
+  title: string;
+  description: string;
+  location: string | null;
+  coords: [number, number] | null; // [lat, lng]
+  eventType: 'migration' | 'conflict' | 'political' | 'economic' | 'founding' | 'alliance' | 'cultural';
+}
+
+export interface EntityConnection {
+  entityId: string;
+  entityType: 'tribe' | 'family' | 'figure' | 'region';
+  relationship: string;
+  context: string;
+}
+
 // --- Core entity types matching JSON data shapes ---
 
 export interface SubTribe {
@@ -46,6 +74,9 @@ export interface Tribe {
   color: string | null;
   subTribes: SubTribe[];
   relations: TribalRelation[];
+  history: string | null;
+  migrationPath: MigrationStep[];
+  timelineEvents: TimelineEvent[];
 }
 
 export interface NotableFigure {
@@ -60,6 +91,10 @@ export interface NotableFigure {
   roleDescription: string | null;
   era: string | null;
   significance: string | null;
+  biography: string | null;
+  achievements: string[];
+  birthPlace: string | null;
+  birthCoords: [number, number] | null; // [lat, lng]
 }
 
 export interface Family {
@@ -76,6 +111,15 @@ export interface Family {
   legitimacyBasis: string | null;
   description: string | null;
   notableFigures: NotableFigure[];
+  history: string | null;
+  modernStatus: string | null;
+  tribalOrigin: string | null;
+  migrationPath: MigrationStep[];
+  timelineEvents: TimelineEvent[];
+  connections: EntityConnection[];
+  entityClassification: 'tribe' | 'family' | 'tribe+family';
+  subTribes: SubTribe[];
+  relations: TribalRelation[];
 }
 
 export interface EthnicGroupRegion {

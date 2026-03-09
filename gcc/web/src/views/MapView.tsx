@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { motion, AnimatePresence } from 'motion/react';
@@ -6,7 +7,7 @@ import Fuse from 'fuse.js';
 import regionsData from '../data/regions.json';
 import tribesData from '../data/tribes.json';
 import familiesData from '../data/families.json';
-import type { Region, Tribe, Family } from '../types';
+import type { Region, Tribe, Family, MigrationStep, TimelineEvent } from '../types';
 
 const regions = regionsData as Region[];
 const tribes = tribesData as Tribe[];
@@ -46,6 +47,7 @@ interface SearchableEntity {
 }
 
 export default function MapView() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
@@ -56,6 +58,11 @@ export default function MapView() {
   const [selectedTribe, setSelectedTribe] = useState<string | null>(null);
   const [tribeQuery, setTribeQuery] = useState('');
   const [tribeDropdownOpen, setTribeDropdownOpen] = useState(false);
+  const [visibleLayers, setVisibleLayers] = useState({
+    presence: true,
+    migration: true,
+    events: true,
+  });
   const tribeSearchRef = useRef<HTMLDivElement>(null);
 
   // Regions with coordinates and entities
@@ -170,6 +177,149 @@ export default function MapView() {
     return { type: 'FeatureCollection', features };
   }, [selectedTribe, highlightedRegions, geoRegions]);
 
+  // Migration path data for the selected entity
+  const selectedEntityData = useMemo(() => {
+    if (!selectedTribe) return null;
+    const tribe = tribeNameMap.get(selectedTribe);
+    if (tribe) return { migrationPath: tribe.migrationPath || [], timelineEvents: tribe.timelineEvents || [], name: tribe.name, type: 'tribe' as const };
+    const family = familyNameMap.get(selectedTribe);
+    if (family) return { migrationPath: family.migrationPath || [], timelineEvents: family.timelineEvents || [], name: family.name, type: 'family' as const };
+    return null;
+  }, [selectedTribe, tribeNameMap, familyNameMap]);
+
+  // Build curved arc GeoJSON for migration paths
+  const migrationGeoJson = useMemo((): GeoJSON.FeatureCollection => {
+    if (!selectedEntityData || selectedEntityData.migrationPath.length === 0) {
+      return { type: 'FeatureCollection', features: [] };
+    }
+
+    const features: GeoJSON.Feature[] = [];
+    for (const step of selectedEntityData.migrationPath) {
+      if (!step.fromCoords || !step.toCoords) continue;
+      // Coords in data are [lat, lng], Mapbox needs [lng, lat]
+      const from: [number, number] = [step.fromCoords[1], step.fromCoords[0]];
+      const to: [number, number] = [step.toCoords[1], step.toCoords[0]];
+
+      // Create a curved arc using a midpoint offset
+      const midLng = (from[0] + to[0]) / 2;
+      const midLat = (from[1] + to[1]) / 2;
+      const dx = to[0] - from[0];
+      const dy = to[1] - from[1];
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Offset perpendicular to the line for curvature
+      const offset = dist * 0.15;
+      const controlLng = midLng + (-dy / dist) * offset;
+      const controlLat = midLat + (dx / dist) * offset;
+
+      // Generate points along the quadratic bezier
+      const points: [number, number][] = [];
+      const segments = 30;
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const lng = (1 - t) * (1 - t) * from[0] + 2 * (1 - t) * t * controlLng + t * t * to[0];
+        const lat = (1 - t) * (1 - t) * from[1] + 2 * (1 - t) * t * controlLat + t * t * to[1];
+        points.push([lng, lat]);
+      }
+
+      features.push({
+        type: 'Feature',
+        properties: {
+          year: step.year,
+          from: step.from,
+          to: step.to,
+          description: step.description,
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: points,
+        },
+      });
+    }
+    return { type: 'FeatureCollection', features };
+  }, [selectedEntityData]);
+
+  // Migration waypoint markers (start/end of each step)
+  const migrationWaypointsGeoJson = useMemo((): GeoJSON.FeatureCollection => {
+    if (!selectedEntityData || selectedEntityData.migrationPath.length === 0) {
+      return { type: 'FeatureCollection', features: [] };
+    }
+
+    const features: GeoJSON.Feature[] = [];
+    const seen = new Set<string>();
+
+    selectedEntityData.migrationPath.forEach((step, idx) => {
+      if (step.fromCoords) {
+        const key = `${step.fromCoords[0]},${step.fromCoords[1]}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const yearLabel = step.endYear
+            ? `${step.year}–${step.endYear}`
+            : step.year ? `${step.year}` : '';
+          features.push({
+            type: 'Feature',
+            properties: {
+              label: step.from,
+              year: yearLabel,
+              order: idx + 1,
+              isOrigin: idx === 0,
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [step.fromCoords[1], step.fromCoords[0]], // [lng, lat]
+            },
+          });
+        }
+      }
+      if (step.toCoords) {
+        const key = `${step.toCoords[0]},${step.toCoords[1]}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          features.push({
+            type: 'Feature',
+            properties: {
+              label: step.to,
+              year: yearLabel,
+              order: idx + 2,
+              isOrigin: false,
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [step.toCoords[1], step.toCoords[0]],
+            },
+          });
+        }
+      }
+    });
+
+    return { type: 'FeatureCollection', features };
+  }, [selectedEntityData]);
+
+  // Timeline events as map markers
+  const eventMarkersGeoJson = useMemo((): GeoJSON.FeatureCollection => {
+    if (!selectedEntityData || selectedEntityData.timelineEvents.length === 0) {
+      return { type: 'FeatureCollection', features: [] };
+    }
+
+    return {
+      type: 'FeatureCollection',
+      features: selectedEntityData.timelineEvents
+        .filter((e) => e.coords)
+        .map((e) => ({
+          type: 'Feature' as const,
+          properties: {
+            title: e.title,
+            year: String(e.year),
+            eventType: e.eventType,
+            description: e.description,
+          },
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [e.coords![1], e.coords![0]], // [lng, lat]
+          },
+        })),
+    };
+  }, [selectedEntityData]);
+
   // Close tribe dropdown on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -180,6 +330,36 @@ export default function MapView() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  // Read entity from URL search params (e.g., ?entity=tribe:bani_yas)
+  useEffect(() => {
+    const entityParam = searchParams.get('entity');
+    if (!entityParam) return;
+
+    const colonIdx = entityParam.indexOf(':');
+    if (colonIdx === -1) return;
+
+    const type = entityParam.slice(0, colonIdx);
+    const id = entityParam.slice(colonIdx + 1);
+
+    if (type === 'tribe' || type === 'family') {
+      setSelectedTribe(id);
+    } else if (type === 'region') {
+      const region = geoRegions.find((r) => r.id === id);
+      if (region) setSelectedRegion(region);
+    } else if (type === 'ethnic') {
+      // Ethnic groups appear as entities within regions; select the first region containing this group
+      for (const r of geoRegions) {
+        if (r.entities.some((e) => e.id === id)) {
+          setSelectedRegion(r);
+          break;
+        }
+      }
+    }
+
+    // Clear the param so it doesn't re-trigger on navigation
+    setSearchParams({}, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build GeoJSON for markers
   const buildGeoJson = useCallback(
@@ -259,6 +439,21 @@ export default function MapView() {
           data: { type: 'FeatureCollection', features: [] },
         });
 
+        map.addSource('migration-arcs', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+
+        map.addSource('migration-waypoints', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+
+        map.addSource('event-markers', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+
         map.addLayer({
           id: 'tribe-connection-lines',
           type: 'line',
@@ -268,6 +463,103 @@ export default function MapView() {
             'line-width': 1.5,
             'line-opacity': 0.4,
             'line-dasharray': [4, 3],
+          },
+        });
+
+        // Migration arc lines — animated gradient
+        map.addLayer({
+          id: 'migration-arc-lines',
+          type: 'line',
+          source: 'migration-arcs',
+          paint: {
+            'line-color': '#C4643A',
+            'line-width': 2.5,
+            'line-opacity': 0.7,
+          },
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+        });
+
+        // Migration arc glow
+        map.addLayer({
+          id: 'migration-arc-glow',
+          type: 'line',
+          source: 'migration-arcs',
+          paint: {
+            'line-color': '#C4643A',
+            'line-width': 6,
+            'line-opacity': 0.15,
+            'line-blur': 3,
+          },
+        }, 'migration-arc-lines');
+
+        // Migration waypoint circles
+        map.addLayer({
+          id: 'migration-waypoint-circles',
+          type: 'circle',
+          source: 'migration-waypoints',
+          paint: {
+            'circle-radius': ['case', ['get', 'isOrigin'], 7, 5],
+            'circle-color': '#FAFAF8',
+            'circle-stroke-width': 2.5,
+            'circle-stroke-color': '#C4643A',
+          },
+        });
+
+        // Migration waypoint labels
+        map.addLayer({
+          id: 'migration-waypoint-labels',
+          type: 'symbol',
+          source: 'migration-waypoints',
+          layout: {
+            'text-field': ['concat', ['get', 'label'], ['case', ['!=', ['get', 'year'], ''], ['concat', '\n', ['get', 'year']], '']],
+            'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+            'text-size': 10,
+            'text-offset': [0, 1.5],
+            'text-anchor': 'top',
+            'text-allow-overlap': true,
+          },
+          paint: {
+            'text-color': '#C4643A',
+            'text-halo-color': '#FAFAF8',
+            'text-halo-width': 2,
+          },
+        });
+
+        // Event markers (small diamonds)
+        map.addLayer({
+          id: 'event-marker-circles',
+          type: 'circle',
+          source: 'event-markers',
+          paint: {
+            'circle-radius': 4,
+            'circle-color': '#1A1A1A',
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#FAFAF8',
+          },
+        });
+
+        // Event marker labels
+        map.addLayer({
+          id: 'event-marker-labels',
+          type: 'symbol',
+          source: 'event-markers',
+          layout: {
+            'text-field': ['concat', ['get', 'year'], ' ', ['get', 'title']],
+            'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+            'text-size': 9,
+            'text-offset': [0, -1.3],
+            'text-anchor': 'bottom',
+            'text-max-width': 12,
+            'text-allow-overlap': false,
+          },
+          paint: {
+            'text-color': '#1A1A1A',
+            'text-halo-color': '#FAFAF8',
+            'text-halo-width': 1.5,
+            'text-opacity': 0.8,
           },
         });
 
@@ -386,16 +678,46 @@ export default function MapView() {
   // Update markers when filters change
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
-    const regionSource = mapRef.current.getSource('regions') as mapboxgl.GeoJSONSource;
+    const map = mapRef.current;
+
+    const emptyCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+    const regionSource = map.getSource('regions') as mapboxgl.GeoJSONSource;
     if (regionSource) {
-      const highlight = selectedTribe ? highlightedRegions : null;
+      const highlight = selectedTribe && visibleLayers.presence ? highlightedRegions : null;
       regionSource.setData(buildGeoJson(showAlignment, countryFilter, highlight));
     }
-    const connSource = mapRef.current.getSource('tribe-connections') as mapboxgl.GeoJSONSource;
+    const connSource = map.getSource('tribe-connections') as mapboxgl.GeoJSONSource;
     if (connSource) {
-      connSource.setData(connectionsGeoJson);
+      connSource.setData(visibleLayers.presence ? connectionsGeoJson : emptyCollection);
     }
-  }, [showAlignment, countryFilter, mapLoaded, buildGeoJson, selectedTribe, highlightedRegions, connectionsGeoJson]);
+    const migArcSource = map.getSource('migration-arcs') as mapboxgl.GeoJSONSource;
+    if (migArcSource) {
+      migArcSource.setData(visibleLayers.migration ? migrationGeoJson : emptyCollection);
+    }
+    const migWpSource = map.getSource('migration-waypoints') as mapboxgl.GeoJSONSource;
+    if (migWpSource) {
+      migWpSource.setData(visibleLayers.migration ? migrationWaypointsGeoJson : emptyCollection);
+    }
+    const evSource = map.getSource('event-markers') as mapboxgl.GeoJSONSource;
+    if (evSource) {
+      evSource.setData(visibleLayers.events ? eventMarkersGeoJson : emptyCollection);
+    }
+
+    // Fit map to migration path bounds if we have one
+    if (selectedTribe && migrationGeoJson.features.length > 0) {
+      const bounds = new mapboxgl.LngLatBounds();
+      for (const feature of migrationGeoJson.features) {
+        const coords = (feature.geometry as GeoJSON.LineString).coordinates;
+        for (const c of coords) {
+          bounds.extend(c as [number, number]);
+        }
+      }
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, { padding: 80, duration: 1000, maxZoom: 8 });
+      }
+    }
+  }, [showAlignment, countryFilter, mapLoaded, buildGeoJson, selectedTribe, highlightedRegions, connectionsGeoJson, migrationGeoJson, migrationWaypointsGeoJson, eventMarkersGeoJson, visibleLayers]);
 
   // Fly to selected region
   useEffect(() => {
@@ -563,6 +885,101 @@ export default function MapView() {
                     <span className="text-text-secondary capitalize">{type.replace(/_/g, ' ')}</span>
                   </div>
                 ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Layer toggles */}
+          {selectedTribe && (
+            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-3 z-10 text-xs space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-text-tertiary font-medium mb-1">Layers</div>
+              {Object.entries(visibleLayers).map(([layer, visible]) => (
+                <label key={layer} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visible}
+                    onChange={() => setVisibleLayers(prev => ({ ...prev, [layer]: !prev[layer as keyof typeof prev] }))}
+                    className="rounded border-border text-accent"
+                  />
+                  <span className="capitalize text-text">{layer}</span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {/* Migration timeline overlay */}
+          <AnimatePresence>
+            {selectedEntityData && (selectedEntityData.migrationPath.length > 0 || selectedEntityData.timelineEvents.length > 0) && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="absolute top-4 left-4 z-10 bg-bg-raised/95 backdrop-blur border border-border
+                           rounded-xl shadow-lg w-72 max-h-[60vh] overflow-y-auto"
+              >
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-display font-bold text-text text-sm">
+                      {selectedEntityData.name}
+                    </h3>
+                    <span className="text-[9px] text-text-tertiary uppercase tracking-wider">
+                      {selectedEntityData.type}
+                    </span>
+                  </div>
+
+                  {/* Migration path */}
+                  {selectedEntityData.migrationPath.length > 0 && (
+                    <div className="mb-4">
+                      <div className="text-[10px] text-text-tertiary uppercase tracking-wider mb-2 font-medium">
+                        Migration Path
+                      </div>
+                      <div className="relative pl-4 border-l-2 border-accent/30 space-y-3">
+                        {selectedEntityData.migrationPath.map((step, i) => (
+                          <div key={i} className="relative">
+                            <div className="absolute -left-[1.3rem] top-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-bg-raised" />
+                            <div className="text-[10px] text-accent font-semibold">
+                              {step.endYear ? `${step.year}–${step.endYear}` : step.year || '?'} &middot; {step.from} → {step.to}
+                            </div>
+                            {step.description && (
+                              <p className="text-[10px] text-text-secondary leading-relaxed mt-0.5">
+                                {step.description}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Timeline events */}
+                  {selectedEntityData.timelineEvents.length > 0 && (
+                    <div>
+                      <div className="text-[10px] text-text-tertiary uppercase tracking-wider mb-2 font-medium">
+                        Key Events
+                      </div>
+                      <div className="space-y-2">
+                        {selectedEntityData.timelineEvents
+                          .sort((a, b) => a.year - b.year)
+                          .slice(0, 12)
+                          .map((ev, i) => (
+                          <div key={i} className="flex gap-2">
+                            <div className="text-[10px] text-text-tertiary font-mono w-8 shrink-0 text-right">
+                              {ev.year}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[10px] font-medium text-text">{ev.title}</div>
+                              {ev.description && (
+                                <p className="text-[9px] text-text-tertiary leading-relaxed mt-0.5 line-clamp-2">
+                                  {ev.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
