@@ -1,0 +1,112 @@
+{
+  "description": "Manual ancestry links from oral tradition, tribal genealogy, and local knowledge. Captures relationships that Wikipedia can't provide.",
+  "relationshipTypes": {
+    "descent": "Blood lineage — this group descends from that group",
+    "confederation": "Political union — this group is a member of that confederation (not blood descent)",
+    "pre_confederation_origin": "Where a section originated BEFORE joining a confederation",
+    "branch": "Split off from — same blood, formed separate entity",
+    "ruling_house": "Ruling family of this tribe/section"
+  },
+  "confidenceLevels": {
+    "confirmed": "Universally accepted, documented in academic sources",
+    "oral_tradition": "Widely held in the region, passed down through families/tribal lore",
+    "claimed": "Some genealogists assert this, disputed by others",
+    "legendary": "Folk/mythological origin, part of cultural identity"
+  },
+  "links": [
+    {
+      "child": "al_bu_falah",
+      "parent": "bani_yas",
+      "relationship": "confederation",
+      "confidence": "confirmed",
+      "note": "Al Bu Falah is a section within the Bani Yas confederation — this is political membership, not necessarily blood descent"
+    },
+    {
+      "child": "al_bu_falasah",
+      "parent": "bani_yas",
+      "relationship": "confederation",
+      "confidence": "confirmed",
+      "note": "Al Bu Falasah is a section within Bani Yas. Split politically from Abu Dhabi to Dubai in 1833"
+    },
+    {
+      "child": "al_bu_falah",
+      "parent": "al_dawasir",
+      "relationship": "pre_confederation_origin",
+      "confidence": "oral_tradition",
+      "note": "Al Bu Falah section may trace deeper roots to the Dawasir tribal confederation of Najd before joining/forming Bani Yas. Not all Bani Yas sections share this origin — Bani Yas is a confederation of diverse groups"
+    },
+    {
+      "child": "al_nahyan",
+      "parent": "al_bu_falah",
+      "relationship": "ruling_house",
+      "confidence": "confirmed",
+      "note": "Al Nahyan are the ruling house of the Al Bu Falah section, ruling Abu Dhabi since 1793"
+    },
+    {
+      "child": "al_maktoum",
+      "parent": "al_bu_falasah",
+      "relationship": "ruling_house",
+      "confidence": "confirmed",
+      "note": "Al Maktoum are the ruling house of Al Bu Falasah, ruling Dubai since 1833 split from Abu Dhabi"
+    },
+    {
+      "child": "al_bu_falasah",
+      "parent": "al_bu_falah",
+      "relationship": "branch",
+      "confidence": "confirmed",
+      "note": "Al Bu Falasah branched from Al Bu Falah in 1833 under Maktoum bin Butti, migrating to Dubai"
+    }
+  ],
+  "nonTribalOrigins": [
+    {
+      "family": "al_khoory",
+      "origin": "persian",
+      "region": "Southern Iran",
+      "confidence": "confirmed",
+      "note": "Persian/Iranian merchants who settled in Dubai Creek (Al Hor) area in early 19th century"
+    },
+    {
+      "family": "al_bastaki",
+      "origin": "persian",
+      "region": "Bastak, Iran",
+      "confidence": "confirmed",
+      "note": "From the town of Bastak in southern Iran, settled in Dubai and Bahrain"
+    },
+    {
+      "family": "bin_laden",
+      "origin": "hadrami",
+      "region": "Hadramaut, Yemen",
+      "confidence": "confirmed",
+      "note": "Hadrami origin from Wadi Doan, migrated to Saudi Arabia"
+    }
+  ],
+  "confederations": [
+    {
+      "id": "bani_yas",
+      "type": "mixed",
+      "formationTheories": [
+        {
+          "theory": "Political alliance against Manasir",
+          "confidence": "oral_tradition",
+          "note": "Some accounts hold that Bani Yas formed as a defensive alliance against the Manasir tribe in the Abu Dhabi hinterland. The Bani Yas-Manasir rivalry is well-documented historically."
+        },
+        {
+          "theory": "Ancient kinship group that expanded",
+          "confidence": "claimed",
+          "note": "Traditional genealogists trace Bani Yas to a common ancestor (Yas bin Amer), making it a genuine kinship group. Other sections then joined through marriage and alliance over centuries."
+        },
+        {
+          "theory": "Hybrid — core kinship + later political additions",
+          "confidence": "oral_tradition",
+          "note": "Most likely reality: a core group with shared ancestry that grew into a confederation as other groups joined for protection, trade, and territorial control. Over generations, intermarriage blurred the line between 'original' and 'allied' sections."
+        }
+      ],
+      "note": "Bani Yas is a confederation with 30+ sections. Whether it started as a blood kinship group, a political alliance (possibly against the Manasir), or both is debated. The truth is probably messy — some sections share deep ancestry, others joined politically, and centuries of intermarriage make the distinction almost meaningless today."
+    },
+    {
+      "id": "al_dawasir",
+      "type": "confederation",
+      "note": "Al Dawasir is itself a confederation of tribes from Wadi al-Dawasir in Najd. Some sections may have migrated to the Gulf coast and joined other confederations like Bani Yas."
+    }
+  ]
+}

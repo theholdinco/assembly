@@ -12,16 +12,6 @@ import ethnicGroupsData from '../data/ethnicGroups.json';
 import eventsData from '../data/events.json';
 import connectionsData from '../data/connections.json';
 
-const SUGGESTION_CHIPS = [
-  "What's the connection between Bahrain and Kuwait's rulers?",
-  'Who lived in Bahrain before the Al Khalifa?',
-  'Which tribes span multiple countries?',
-  'What does Al-Balushi mean?',
-  'Al Nahyan',
-  'Bani Yas',
-  'Jewish families in Bahrain',
-  'Ghafiri vs Hinawi',
-];
 
 const ORIGIN_BADGE_STYLES: Record<string, { bg: string; text: string }> = {
   tribal: { bg: 'bg-accent/20', text: 'text-accent' },
@@ -37,14 +27,14 @@ const EXPLORE_CATEGORIES = [
     description: 'Explore the complex web of Arabian tribal alliances and hierarchies',
     icon: ShieldIcon,
     count: tribesData.length,
-    route: '/tree',
+    route: '/lineage',
   },
   {
     title: 'Ruling Families',
     description: 'The dynasties that shaped the Gulf states',
     icon: CrownIcon,
     count: (familiesData as { isRuling: number }[]).filter((f) => f.isRuling).length,
-    route: '/tree',
+    route: '/lineage',
   },
   {
     title: 'Historical Events',
@@ -133,10 +123,6 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
     }
   };
 
-  const handleChipClick = (text: string) => {
-    setQuery(text);
-  };
-
   const hasResults = results.length > 0;
   const showEmptyState = !query.trim();
 
@@ -153,10 +139,10 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
             className="text-center mb-12"
           >
             <h1 className="font-display text-5xl md:text-7xl font-bold text-text mb-4 tracking-tight">
-              Who Are You?
+              Look Them Up
             </h1>
             <p className="font-body text-text-secondary text-lg md:text-xl max-w-xl mx-auto">
-              Explore your heritage through Arabian tribal lineages
+              Search any family name, tribe, or figure from the Arabian Gulf
             </p>
           </motion.div>
 
@@ -183,7 +169,7 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
                 onChange={(e) => setQuery(e.target.value)}
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
-                placeholder="Enter a family name, tribe, or ask a question..."
+                placeholder="Search a family name, tribe, or person..."
                 className="w-full bg-white rounded-2xl py-5 pl-14 pr-12
                            font-body text-lg text-text placeholder:text-text-tertiary
                            outline-none border-none"
@@ -199,26 +185,6 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
             </div>
           </motion.div>
 
-          {/* Suggestion Chips */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className="flex flex-wrap justify-center gap-2 mt-6 max-w-3xl mx-auto"
-          >
-            {SUGGESTION_CHIPS.map((chip) => (
-              <button
-                key={chip}
-                onClick={() => handleChipClick(chip)}
-                className="px-4 py-1.5 rounded-full bg-bg-subtle border border-border
-                           font-display italic text-sm text-text-secondary
-                           hover:border-border-strong hover:bg-bg-raised hover:text-text
-                           transition-all duration-200 cursor-pointer"
-              >
-                {chip}
-              </button>
-            ))}
-          </motion.div>
         </div>
       </section>
 
@@ -280,12 +246,6 @@ function NameOriginCard({
           <h2 className="font-display text-3xl md:text-4xl font-bold text-text mb-1">
             {match.surname}
           </h2>
-          {match.surnameAr && (
-            <p className="text-lg text-text-secondary mb-4" dir="rtl">
-              {match.surnameAr}
-            </p>
-          )}
-
           {match.meaning && (
             <p className="text-text-secondary text-base leading-relaxed mb-4">
               <span className="font-semibold text-text">Meaning:</span> {match.meaning}
@@ -466,7 +426,7 @@ function EmptyState({ onNavigate }: { onNavigate: (path: string) => void }) {
       <div className="text-center mb-8 mt-4">
         <div className="border-b border-border max-w-xs mx-auto mb-6" />
         <h2 className="font-display text-2xl font-semibold text-text mb-1">Explore</h2>
-        <p className="text-text-tertiary text-sm">Dive into the rich tapestry of Arabian heritage</p>
+        <p className="text-text-tertiary text-sm">Browse by category</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto">

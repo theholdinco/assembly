@@ -248,13 +248,14 @@ export default function MapView() {
     const seen = new Set<string>();
 
     selectedEntityData.migrationPath.forEach((step, idx) => {
+      const yearLabel = step.endYear
+        ? `${step.year}–${step.endYear}`
+        : step.year ? `${step.year}` : '';
+
       if (step.fromCoords) {
         const key = `${step.fromCoords[0]},${step.fromCoords[1]}`;
         if (!seen.has(key)) {
           seen.add(key);
-          const yearLabel = step.endYear
-            ? `${step.year}–${step.endYear}`
-            : step.year ? `${step.year}` : '';
           features.push({
             type: 'Feature',
             properties: {

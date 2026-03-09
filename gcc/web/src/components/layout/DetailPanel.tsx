@@ -87,14 +87,17 @@ function getQuickFacts(entity: Entity): Array<{ label: string; value: string }> 
 }
 
 function getInsight(entity: Entity): string | null {
+  let insight: string | null = null;
   switch (entity.type) {
-    case 'tribe': return entity.data.ancestorStory || entity.data.legitimacyNotes || null;
-    case 'family': return entity.data.originStory || null;
-    case 'ethnic': return entity.data.keyTension || null;
-    case 'event': return entity.data.surpriseFactor || null;
-    case 'region': return entity.data.strategicImportance || null;
+    case 'tribe': insight = entity.data.ancestorStory || entity.data.legitimacyNotes || null; break;
+    case 'family': insight = entity.data.originStory || null; break;
+    case 'ethnic': insight = entity.data.keyTension || null; break;
+    case 'event': insight = entity.data.surpriseFactor || null; break;
+    case 'region': insight = entity.data.strategicImportance || null; break;
     default: return null;
   }
+  if (insight?.includes('UNKNOWN')) return null;
+  return insight;
 }
 
 interface DetailPanelProps {
@@ -198,6 +201,117 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 );
               })()}
 
+              {/* History */}
+              {('history' in entity.data) && (entity.data as any).history && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">History</h3>
+                  <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-line">
+                    {(entity.data as any).history}
+                  </p>
+                </div>
+              )}
+
+              {/* Tribal Origin */}
+              {entity.type === 'family' && entity.data.tribalOrigin && (
+                <div className="mb-6">
+                  <div className="bg-bg-subtle rounded-lg p-3">
+                    <div className="text-xs text-text-tertiary uppercase tracking-wider">Tribal Origin</div>
+                    <div className="text-sm font-medium text-text mt-0.5">{entity.data.tribalOrigin}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Modern Status */}
+              {entity.type === 'family' && entity.data.modernStatus && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">Modern Status</h3>
+                  <p className="text-sm text-text-secondary leading-relaxed">{entity.data.modernStatus}</p>
+                </div>
+              )}
+
+              {/* Timeline Events */}
+              {('timelineEvents' in entity.data) && (entity.data as any).timelineEvents?.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">
+                    Timeline
+                    <span className="text-sm font-normal text-text-tertiary ml-2">
+                      ({(entity.data as any).timelineEvents.length})
+                    </span>
+                  </h3>
+                  <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+                    {(entity.data as any).timelineEvents
+                      .sort((a: any, b: any) => (a.year || 0) - (b.year || 0))
+                      .map((evt: any, i: number) => (
+                        <div key={i} className="border-l-2 border-accent/30 pl-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-accent">{evt.year}</span>
+                            <span className="text-xs text-text-tertiary capitalize">{evt.eventType}</span>
+                          </div>
+                          <div className="text-sm font-medium text-text">{evt.title}</div>
+                          {evt.description && (
+                            <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{evt.description}</p>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Migration Path */}
+              {('migrationPath' in entity.data) && (entity.data as any).migrationPath?.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">Migration Path</h3>
+                  <div className="space-y-2">
+                    {(entity.data as any).migrationPath.map((step: any, i: number) => (
+                      <div key={i} className="flex items-start gap-2 text-sm">
+                        <span className="text-accent font-mono text-xs mt-0.5 shrink-0">
+                          {step.endYear ? `${step.year}–${step.endYear}` : step.year || '?'}
+                        </span>
+                        <span className="text-text-secondary">
+                          {step.from} → {step.to}
+                          {step.description && <span className="text-text-tertiary"> — {step.description}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Name Etymology */}
+              {('nameEtymology' in entity.data) && (entity.data as any).nameEtymology && (
+                <div className="mb-6 bg-bg-subtle rounded-lg p-4">
+                  <div className="text-xs font-medium text-accent uppercase tracking-wider mb-1">Name Origin</div>
+                  <p className="text-sm text-text-secondary leading-relaxed">{(entity.data as any).nameEtymology}</p>
+                </div>
+              )}
+
+              {/* Folk Legends */}
+              {('folkLegends' in entity.data) && (entity.data as any).folkLegends?.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-display text-lg font-semibold text-text mb-2">
+                    Folk Legends & Oral Traditions
+                  </h3>
+                  <div className="space-y-3">
+                    {(entity.data as any).folkLegends.map((legend: any, i: number) => (
+                      <div key={i} className="border-l-2 border-plum/40 pl-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium text-text">{legend.title}</span>
+                          {legend.plausibility && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-subtle text-text-tertiary capitalize">
+                              {legend.plausibility}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-text-secondary leading-relaxed">{legend.story}</p>
+                        {legend.source && (
+                          <p className="text-xs text-text-tertiary mt-1 italic">Source: {legend.source}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Related entities */}
               {entity.type === 'tribe' && entity.data.relations.length > 0 && (
                 <div className="mb-6">
@@ -227,9 +341,9 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                     </span>
                   </h3>
                   <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
-                    {entity.data.notableFigures.map((fig) => (
+                    {entity.data.notableFigures.map((fig, idx) => (
                       <button
-                        key={fig.id}
+                        key={`${fig.id}-${idx}`}
                         onClick={() => { onClose(); navigate(`/figure/${fig.id}`); }}
                         className="w-full text-left p-2 rounded-lg hover:bg-bg-subtle transition-colors"
                       >
@@ -281,10 +395,10 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 )}
                 {(entity.type === 'tribe' || entity.type === 'family') && (
                   <button
-                    onClick={() => { onClose(); navigate('/tree'); }}
+                    onClick={() => { onClose(); navigate('/lineage'); }}
                     className="px-4 py-2 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
                   >
-                    Show in Tree
+                    Show in Lineage
                   </button>
                 )}
                 {entity.type === 'event' && (

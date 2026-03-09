@@ -1,0 +1,70 @@
+[Shard 5/10] Total entities: 557, my share: 56
+[S5][1/56] family: Al Bu Said... OK (100000r, 1953h, 3fig, 0folk, 6ev)
+[S5][2/56] family: Al Mualla... OK (100000r, 2009h, 3fig, 0folk, 4ev)
+[S5][3/56] family: Al Saud (House of Saud)... OK (100000r, 2333h, 3fig, 0folk, 6ev)
+[S5][4/56] family: Al-Mannai... OK (100000r, 1916h, 2fig, 0folk, 3ev)
+[S5][5/56] family: Bani Hafiz Family... OK (100000r, 1089h, 0fig, 0folk, 0ev)
+  [Saved 5 results]
+[S5][6/56] family: Kalantarian Family... OK (34911r, 1527h, 1fig, 0folk, 2ev)
+[S5][7/56] family: Al Ghurair... OK (27038r, 1533h, 6fig, 0folk, 8ev)
+[S5][8/56] family: Al Zarooni... NO RESEARCH OK (0r, 809h, 1fig, 0folk, 1ev)
+[S5][9/56] family: Al Mazrouei... OK (100000r, 2402h, 3fig, 1folk, 2ev)
+[S5][10/56] family: Al Dabbagh... OK (100000r, 1614h, 3fig, 0folk, 3ev)
+  [Saved 10 results]
+[S5][11/56] family: Kanoo... OK (100000r, 1741h, 4fig, 0folk, 5ev)
+[S5][12/56] family: Al Rawas... OK (81305r, 1454h, 1fig, 0folk, 3ev)
+[S5][13/56] family: Al Bastaki... OK (100000r, 1935h, 3fig, 0folk, 3ev)
+[S5][14/56] family: Zahid... OK (100000r, 1472h, 2fig, 0folk, 1ev)
+[S5][15/56] family: Al Qahtani... OK (100000r, 2524h, 4fig, 0folk, 5ev)
+  [Saved 15 results]
+[S5][16/56] family: Al Ghunaim... OK (100000r, 1234h, 2fig, 0folk, 1ev)
+[S5][17/56] family: Al Mohannadi... OK (83000r, 1776h, 3fig, 1folk, 3ev)
+[S5][18/56] tribe: Abd al-Qays... OK (100000r, 2470h, 0fig, 0folk, 5ev)
+[S5][19/56] tribe: Ajman... OK (100000r, 1630h, 0fig, 1folk, 6ev)
+[S5][20/56] tribe: Al Aunan... OK (100000r, 2321h, 0fig, 0folk, 4ev)
+  [Saved 20 results]
+[S5][21/56] tribe: Al Bu Shamis... OK (100000r, 2580h, 0fig, 0folk, 5ev)
+[S5][22/56] tribe: Al-Jadara... OK (80504r, 0h, 0fig, 0folk, 0ev)
+[S5][23/56] tribe: Mishagin... NO RESEARCH OK (0r, 175h, 0fig, 0folk, 0ev)
+[S5][24/56] tribe: Al-Omaro Bani Uqba... NO RESEARCH OK (0r, 1130h, 0fig, 0folk, 0ev)
+[S5][25/56] tribe: Al-Shaleikh... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+  [Saved 25 results]
+[S5][26/56] tribe: Al Yosha'a... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+[S5][27/56] tribe: Alrathea... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+[S5][28/56] tribe: Annazah... OK (31978r, 2956h, 0fig, 2folk, 5ev)
+[S5][29/56] tribe: Bakil... OK (69626r, 2428h, 0fig, 1folk, 4ev)
+[S5][30/56] tribe: Bani Hussein... NO RESEARCH OK (0r, 671h, 0fig, 0folk, 0ev)
+  [Saved 30 results]
+[S5][31/56] tribe: Bani Yas... OK (85602r, 3047h, 0fig, 1folk, 5ev)
+[S5][32/56] tribe: Banu Ghassan... OK (100000r, 3585h, 0fig, 2folk, 6ev)
+[S5][33/56] tribe: Banu Jundub... OK (30355r, 0h, 0fig, 0folk, 0ev)
+[S5][34/56] tribe: Banu Manhib... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+[S5][35/56] tribe: Banu Al-Sakasek... OK (21417r, 1707h, 0fig, 0folk, 3ev)
+  [Saved 35 results]
+[S5][36/56] tribe: Banu Yam... OK (100000r, 2078h, 0fig, 0folk, 4ev)
+[S5][37/56] tribe: Daramikah... OK (24991r, 2696h, 0fig, 0folk, 2ev)
+[S5][38/56] tribe: Duru... OK (48467r, 2500h, 0fig, 0folk, 4ev)
+[S5][39/56] tribe: Ghatafan... OK (100000r, 2919h, 0fig, 1folk, 5ev)
+[S5][40/56] tribe: Hamudiyin... OK (17214r, 1559h, 0fig, 0folk, 7ev)
+  [Saved 40 results]
+[S5][41/56] tribe: Huwayla... OK (100000r, 1799h, 0fig, 0folk, 3ev)
+[S5][42/56] tribe: al-Kabanah... OK (100000r, 1487h, 0fig, 2folk, 1ev)
+[S5][43/56] tribe: Khuza'a... OK (97277r, 3038h, 0fig, 3folk, 9ev)
+[S5][44/56] tribe: Lakhmid... OK (62338r, 3081h, 0fig, 0folk, 6ev)
+[S5][45/56] tribe: Manasir al-Badiyah (Bedouin Manasir)... OK (36454r, 2549h, 0fig, 3folk, 0ev)
+  [Saved 45 results]
+[S5][46/56] tribe: Mazrui... OK (100000r, 2949h, 0fig, 0folk, 4ev)
+[S5][47/56] tribe: Al-'Ulwa... OK (100000r, 2614h, 0fig, 0folk, 4ev)
+[S5][48/56] tribe: Qahtan (Qahtanite lineage)... OK (60987r, 2982h, 0fig, 4folk, 3ev)
+[S5][49/56] tribe: Rabi'ah... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+[S5][50/56] tribe: Saba'... OK (100000r, 3072h, 0fig, 2folk, 8ev)
+  [Saved 50 results]
+[S5][51/56] tribe: Shammar al-Jarba... BAD JSON
+[S5][52/56] tribe: Sudan (Al Suwaidi)... OK (100000r, 3129h, 0fig, 0folk, 9ev)
+[S5][53/56] tribe: Thamalah... NO RESEARCH OK (0r, 275h, 0fig, 0folk, 0ev)
+[S5][54/56] tribe: Yaarubah... OK (100000r, 2619h, 0fig, 1folk, 8ev)
+[S5][55/56] tribe: Banu Kinanah... OK (100000r, 2690h, 0fig, 1folk, 4ev)
+[S5][56/56] tribe: Banu Zayd... OK (100000r, 2003h, 0fig, 0folk, 3ev)
+  [Saved 55 results]
+
+[Shard 5] DONE: 55 enriched, 1 failed, 0 skipped (resumed)

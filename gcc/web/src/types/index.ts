@@ -55,6 +55,13 @@ export interface TribalRelation {
   context: string | null;
 }
 
+export interface FolkLegend {
+  title: string;
+  story: string;
+  source: string | null;
+  plausibility: 'likely' | 'possible' | 'disputed' | 'uncertain' | null;
+}
+
 export interface Tribe {
   id: string;
   name: string;
@@ -77,6 +84,8 @@ export interface Tribe {
   history: string | null;
   migrationPath: MigrationStep[];
   timelineEvents: TimelineEvent[];
+  folkLegends: FolkLegend[];
+  nameEtymology: string | null;
 }
 
 export interface NotableFigure {
@@ -120,6 +129,8 @@ export interface Family {
   entityClassification: 'tribe' | 'family' | 'tribe+family';
   subTribes: SubTribe[];
   relations: TribalRelation[];
+  folkLegends: FolkLegend[];
+  nameEtymology: string | null;
 }
 
 export interface EthnicGroupRegion {

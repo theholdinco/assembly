@@ -19,7 +19,7 @@ const GROUP_COLORS: Record<string, string> = {
   unknown: '#888',
   '<UNKNOWN>': '#888',
   disputed: '#8E44AD',
-  family: '#2C3E50',
+  family: '#5B6B7A',
 };
 
 const LINK_DISTANCE: Record<string, number> = {
@@ -127,7 +127,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .attr('dx', 0).attr('dy', 0)
       .attr('stdDeviation', 4)
       .attr('flood-color', '#C4643A')
-      .attr('flood-opacity', 0.8);
+      .attr('flood-opacity', 0.5);
 
     const g = svg.append('g');
 
@@ -151,7 +151,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .data(links)
       .join('line')
       .attr('stroke', '#C4643A')
-      .attr('stroke-opacity', 0.3)
+      .attr('stroke-opacity', 0.4)
       .attr('stroke-width', d => Math.max(0.5, d.strength * 2))
       .attr('stroke-dasharray', d => getLinkStroke(d.type));
 
@@ -161,7 +161,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .join('circle')
       .attr('r', d => nodeRadius(d))
       .attr('fill', d => GROUP_COLORS[d.group] ?? '#888')
-      .attr('stroke', '#1a1a2e')
+      .attr('stroke', '#E8E6E1')
       .attr('stroke-width', 1)
       .style('cursor', 'pointer');
 
@@ -172,7 +172,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .text(d => d.name)
       .attr('font-size', 10)
       .attr('font-family', "'DM Sans', sans-serif")
-      .attr('fill', '#E8E8E6')
+      .attr('fill', '#1A1A1A')
       .attr('text-anchor', 'middle')
       .attr('dy', d => -nodeRadius(d) - 4)
       .attr('pointer-events', 'none')
@@ -235,7 +235,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .transition()
       .duration(1000)
       .delay((_d, i) => i * 2)
-      .attr('stroke-opacity', 0.3);
+      .attr('stroke-opacity', 0.4);
 
     return () => {
       simulation.stop();
@@ -264,7 +264,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
       .attr('stroke', d => {
         if (searchHighlight && d.id === searchHighlight) return '#C4643A';
         if (d.id === selectedNodeId) return '#C4643A';
-        return '#1a1a2e';
+        return '#E8E6E1';
       })
       .attr('stroke-width', d => {
         if (d.id === selectedNodeId || (searchHighlight && d.id === searchHighlight)) return 2.5;
@@ -331,37 +331,31 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
   return (
     <div
       ref={containerRef}
-      className="relative w-full overflow-hidden"
-      style={{ height: 'calc(100vh - 4rem)', background: '#1a1a2e' }}
+      className="relative w-full overflow-hidden bg-bg"
+      style={{ height: 'calc(100vh - 4rem)' }}
     >
       <svg ref={svgRef} className="absolute inset-0 w-full h-full" />
 
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="pointer-events-none absolute z-50 rounded-lg px-3 py-2 text-sm shadow-lg"
+          className="pointer-events-none absolute z-50 rounded-lg border border-border bg-bg-raised px-3 py-2 text-sm shadow-lg"
           style={{
             left: tooltip.x + 14,
             top: tooltip.y - 10,
-            background: 'rgba(26, 26, 46, 0.92)',
-            border: '1px solid rgba(196, 100, 58, 0.4)',
-            color: '#E8E8E6',
             backdropFilter: 'blur(8px)',
           }}
         >
           <div className="font-display font-semibold text-accent">{tooltip.node.name}</div>
-          <div className="text-xs opacity-70 capitalize">{tooltip.node.type} &middot; {tooltip.node.group}</div>
+          <div className="text-xs text-text-tertiary capitalize">{tooltip.node.type} &middot; {tooltip.node.group}</div>
         </div>
       )}
 
       {/* Controls Panel */}
       <div
-        className="absolute top-4 left-4 z-40 flex flex-col gap-3 rounded-xl p-4 text-sm max-h-[calc(100vh-8rem)] overflow-y-auto"
+        className="absolute top-4 left-4 z-40 flex flex-col gap-3 rounded-xl border border-border bg-bg-raised/90 p-4 text-sm text-text max-h-[calc(100vh-8rem)] overflow-y-auto"
         style={{
-          background: 'rgba(26, 26, 46, 0.75)',
-          border: '1px solid rgba(196, 100, 58, 0.25)',
           backdropFilter: 'blur(12px)',
-          color: '#E8E8E6',
           width: 220,
         }}
       >
@@ -373,8 +367,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
           placeholder="Search node..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          className="rounded px-2 py-1 text-xs outline-none"
-          style={{ background: 'rgba(232, 232, 230, 0.1)', border: '1px solid rgba(196, 100, 58, 0.3)', color: '#E8E8E6' }}
+          className="rounded border border-border bg-bg-subtle px-2 py-1 text-xs text-text outline-none"
         />
 
         {/* Filter by type */}
@@ -448,8 +441,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
 
         <button
           onClick={resetView}
-          className="mt-1 rounded px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer"
-          style={{ background: 'rgba(196, 100, 58, 0.25)', border: '1px solid rgba(196, 100, 58, 0.4)', color: '#C4643A' }}
+          className="mt-1 rounded border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition-colors cursor-pointer hover:bg-accent/20"
         >
           Reset View
         </button>
@@ -457,13 +449,8 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
 
       {/* Legend */}
       <div
-        className="absolute bottom-4 right-4 z-40 rounded-xl p-3 text-xs"
-        style={{
-          background: 'rgba(26, 26, 46, 0.75)',
-          border: '1px solid rgba(196, 100, 58, 0.25)',
-          backdropFilter: 'blur(12px)',
-          color: '#E8E8E6',
-        }}
+        className="absolute bottom-4 right-4 z-40 rounded-xl border border-border bg-bg-raised/90 p-3 text-xs text-text"
+        style={{ backdropFilter: 'blur(12px)' }}
       >
         <div className="font-semibold mb-2 opacity-70 uppercase tracking-wide">Legend</div>
         <div className="flex flex-col gap-1.5">
@@ -483,7 +470,7 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
             <span className="inline-block w-3 h-3 rounded-full" style={{ background: '#888' }} />
             Unknown
           </div>
-          <div className="border-t border-white/10 my-1" />
+          <div className="border-t border-border my-1" />
           <div className="flex items-center gap-2">
             <svg width="24" height="6"><line x1="0" y1="3" x2="24" y2="3" stroke="#C4643A" strokeWidth="1.5" /></svg>
             Alliance / Lineage

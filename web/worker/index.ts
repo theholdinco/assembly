@@ -13,7 +13,6 @@ import {
   runAnalysisPipeline,
   runScreeningPipeline,
 } from "./clo-pipeline.js";
-import { runScanPipeline } from "./pulse-pipeline.js";
 import { runSectionPpmExtraction } from "../lib/clo/extraction/ppm-extraction.js";
 import { runExtraction, runSectionExtraction } from "../lib/clo/extraction/runner.js";
 import { runPortfolioExtraction } from "../lib/clo/extraction/portfolio-extraction.js";
@@ -494,66 +493,6 @@ async function pollCloJobs() {
       console.log(`[worker] CLO screening ${screeningJob.id} completed`);
     } catch (err) {
       await handleCloJobError("clo_screenings", screeningJob.id, screeningJob.user_id, err);
-    }
-  }
-}
-
-// ─── Pulse Jobs ─────────────────────────────────────────────────────
-
-async function claimScanJob() {
-  const result = await pool.query(
-    `UPDATE pulse_scans SET status = 'running', current_phase = 'fetching-sources'
-     WHERE id = (
-       SELECT id FROM pulse_scans WHERE status = 'queued'
-       ORDER BY created_at LIMIT 1
-       FOR UPDATE SKIP LOCKED
-     )
-     RETURNING id, raw_files`
-  );
-  return result.rows[0] ?? null;
-}
-
-const PULSE_SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-let lastScheduledScan = 0;
-
-async function maybeScheduleScan() {
-  const now = Date.now();
-  if (now - lastScheduledScan < PULSE_SCAN_INTERVAL_MS) return;
-  lastScheduledScan = now;
-
-  const pending = await pool.query(
-    "SELECT id FROM pulse_scans WHERE status IN ('queued', 'running') LIMIT 1"
-  );
-  if (pending.rows.length > 0) return;
-
-  await pool.query(
-    "INSERT INTO pulse_scans (trigger_type, status) VALUES ('scheduled', 'queued')"
-  );
-  console.log("[worker] Scheduled pulse scan inserted");
-}
-
-async function pollPulseJobs() {
-  await maybeScheduleScan();
-
-  const scanJob = await claimScanJob();
-  if (scanJob) {
-    console.log(`[worker] Claimed pulse scan job ${scanJob.id}`);
-    try {
-      await runScanPipeline(pool, scanJob.id, scanJob.raw_files || {}, {
-        updatePhase: async (phase) => {
-          console.log(`[worker] Pulse scan ${scanJob.id}: ${phase}`);
-          await pool.query("UPDATE pulse_scans SET current_phase = $1 WHERE id = $2", [phase, scanJob.id]);
-        },
-        updateRawFiles: async (files) => {
-          await pool.query("UPDATE pulse_scans SET raw_files = $1::jsonb WHERE id = $2", [JSON.stringify(files), scanJob.id]);
-        },
-      });
-      await pool.query("UPDATE pulse_scans SET status = 'complete', completed_at = NOW() WHERE id = $1", [scanJob.id]);
-      console.log(`[worker] Pulse scan ${scanJob.id} completed`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      console.error(`[worker] Pulse scan ${scanJob.id} failed: ${message}`);
-      await pool.query("UPDATE pulse_scans SET status = 'error', error_message = $1 WHERE id = $2", [message, scanJob.id]);
     }
   }
 }
@@ -1066,9 +1005,6 @@ async function pollLoop() {
 
       // CLO extraction jobs (PPM + portfolio)
       await pollCloExtractionJobs();
-
-      // Pulse jobs
-      await pollPulseJobs();
 
       // Daily briefing
       await maybeFetchBriefing();

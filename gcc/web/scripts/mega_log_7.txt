@@ -1,0 +1,68 @@
+[Shard 7/10] Total entities: 557, my share: 55
+[S7][1/55] family: Al Dosari... OK (100000r, 2777h, 2fig, 0folk, 3ev)
+[S7][2/55] family: Al Naimi... OK (100000r, 2803h, 2fig, 0folk, 4ev)
+[S7][3/55] family: Al Thani... OK (76982r, 1528h, 3fig, 0folk, 3ev)
+[S7][4/55] family: Al-Noaimi... OK (100000r, 1898h, 3fig, 0folk, 3ev)
+[S7][5/55] family: Cohen-Maghari (Meguri)... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+  [Saved 5 results]
+[S7][6/55] family: Nonoo... OK (100000r, 1872h, 5fig, 0folk, 4ev)
+[S7][7/55] family: Al Habtoor... OK (100000r, 1654h, 1fig, 0folk, 5ev)
+[S7][8/55] family: Al Shamsi... OK (61919r, 2389h, 4fig, 0folk, 4ev)
+[S7][9/55] family: Al Ameri... OK (100000r, 1634h, 2fig, 0folk, 4ev)
+[S7][10/55] family: Al Zamil... OK (100000r, 1653h, 2fig, 0folk, 5ev)
+  [Saved 10 results]
+[S7][11/55] family: Jawad... OK (74508r, 1317h, 0fig, 0folk, 0ev)
+[S7][12/55] family: Al Jallaf... OK (5200r, 1045h, 0fig, 0folk, 0ev)
+[S7][13/55] family: Abdul Latif Jameel... OK (100000r, 1794h, 4fig, 0folk, 6ev)
+[S7][14/55] family: Kamel... OK (100000r, 2431h, 3fig, 0folk, 8ev)
+[S7][15/55] family: Al Drees... OK (100000r, 1505h, 1fig, 0folk, 5ev)
+  [Saved 15 results]
+[S7][16/55] family: Boodai... OK (88987r, 1931h, 4fig, 0folk, 4ev)
+[S7][17/55] family: Nass... OK (100000r, 1491h, 2fig, 0folk, 7ev)
+[S7][18/55] tribe: Abida... OK (57422r, 2318h, 0fig, 0folk, 1ev)
+[S7][19/55] tribe: Al Bin Ali... OK (100000r, 2384h, 0fig, 0folk, 4ev)
+[S7][20/55] tribe: Al-Azaznah tribe... OK (100000r, 1526h, 0fig, 0folk, 2ev)
+  [Saved 20 results]
+[S7][21/55] tribe: Al Fadl... OK (100000r, 1552h, 0fig, 3folk, 7ev)
+[S7][22/55] tribe: Al Janah... OK (100000r, 2622h, 0fig, 1folk, 5ev)
+[S7][23/55] tribe: Al Mira... OK (67978r, 1787h, 0fig, 0folk, 4ev)
+[S7][24/55] tribe: Al Qasimi of Ras Al Khaimah... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+[S7][25/55] tribe: Sabais... OK (34101r, 0h, 0fig, 0folk, 0ev)
+  [Saved 25 results]
+[S7][26/55] tribe: Alhamamada... OK (2602r, 2112h, 0fig, 0folk, 2ev)
+[S7][27/55] tribe: Alsawalima... OK (5560r, 1486h, 0fig, 0folk, 1ev)
+[S7][28/55] tribe: Asad... OK (25727r, 2246h, 0fig, 0folk, 5ev)
+[S7][29/55] tribe: Bani Abbad... OK (22709r, 1197h, 0fig, 0folk, 1ev)
+[S7][30/55] tribe: Bani Kaab... OK (100000r, 3040h, 0fig, 0folk, 4ev)
+  [Saved 30 results]
+[S7][31/55] tribe: Banu Adi... OK (100000r, 1393h, 0fig, 0folk, 2ev)
+[S7][32/55] tribe: Banu Hanifa... BAD JSON
+[S7][33/55] tribe: Banu Kathir... OK (100000r, 1187h, 0fig, 0folk, 0ev)
+[S7][34/55] tribe: Banu Muayiya... OK (13003r, 1489h, 0fig, 0folk, 2ev)
+[S7][35/55] tribe: Banu Al-Sukun... OK (6910r, 538h, 0fig, 0folk, 0ev)
+[S7][36/55] tribe: Banu Zuhra... NO RESEARCH OK (0r, 99h, 0fig, 0folk, 0ev)
+  [Saved 35 results]
+[S7][37/55] tribe: Daws... OK (28329r, 2907h, 0fig, 0folk, 4ev)
+[S7][38/55] tribe: Fad'an... OK (14751r, 2753h, 0fig, 0folk, 2ev)
+[S7][39/55] tribe: Guzayah... OK (94371r, 1761h, 0fig, 0folk, 0ev)
+[S7][40/55] tribe: Hasana... OK (100000r, 1912h, 0fig, 0folk, 5ev)
+[S7][41/55] tribe: Jadis... OK (100000r, 2180h, 0fig, 2folk, 3ev)
+  [Saved 40 results]
+[S7][42/55] tribe: Kahlan... OK (100000r, 2794h, 0fig, 1folk, 4ev)
+[S7][43/55] tribe: Kinana... OK (100000r, 2601h, 0fig, 1folk, 5ev)
+[S7][44/55] tribe: Madhhij... OK (100000r, 2353h, 0fig, 1folk, 3ev)
+[S7][45/55] tribe: Maqadilah... OK (17450r, 2065h, 0fig, 0folk, 4ev)
+[S7][46/55] tribe: Miyadilah... NO RESEARCH OK (0r, 0h, 0fig, 0folk, 0ev)
+  [Saved 45 results]
+[S7][47/55] tribe: Braih... OK (7656r, 1688h, 0fig, 0folk, 5ev)
+[S7][48/55] tribe: Qataban... OK (100000r, 2135h, 0fig, 0folk, 6ev)
+[S7][49/55] tribe: Rashid... OK (76608r, 0h, 0fig, 0folk, 0ev)
+[S7][50/55] tribe: Sakasic... OK (15814r, 2028h, 0fig, 0folk, 3ev)
+[S7][51/55] tribe: Shammar Toga... OK (4178r, 909h, 0fig, 0folk, 0ev)
+  [Saved 50 results]
+[S7][52/55] tribe: Suhool... OK (14305r, 2390h, 0fig, 0folk, 1ev)
+[S7][53/55] tribe: Tunaij... OK (8086r, 2481h, 0fig, 0folk, 3ev)
+[S7][54/55] tribe: Yidwah... OK (2823r, 1789h, 0fig, 0folk, 3ev)
+[S7][55/55] tribe: Banu Asad... OK (51498r, 2640h, 0fig, 0folk, 6ev)
+
+[Shard 7] DONE: 54 enriched, 1 failed, 0 skipped (resumed)

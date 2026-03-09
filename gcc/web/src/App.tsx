@@ -8,6 +8,7 @@ import MapView from './views/MapView';
 import TreeView from './views/TreeView';
 import TimelineView from './views/TimelineView';
 import ConnectionsView from './views/ConnectionsView';
+import LineageExplorer from './views/LineageExplorer';
 import type { Entity, EntityType } from './types';
 
 import tribesData from './data/tribes.json';
@@ -15,17 +16,21 @@ import familiesData from './data/families.json';
 import ethnicGroupsData from './data/ethnicGroups.json';
 import eventsData from './data/events.json';
 import regionsData from './data/regions.json';
+import lineageData from './data/lineage.json';
 import type { Tribe, Family, NotableFigure, EthnicGroup, HistoricalEvent, Region } from './types';
 
 function findEntity(type: EntityType, id: string): Entity | null {
   switch (type) {
     case 'tribe': {
       const item = (tribesData as Tribe[]).find((t) => t.id === id);
-      return item ? { type: 'tribe', data: item } : null;
+      if (item) return { type: 'tribe', data: item };
+      // Fallback: create stub from lineage data for orphan graph nodes
+      return stubFromLineage(id, 'tribe');
     }
     case 'family': {
       const item = (familiesData as Family[]).find((f) => f.id === id);
-      return item ? { type: 'family', data: item } : null;
+      if (item) return { type: 'family', data: item };
+      return stubFromLineage(id, 'family');
     }
     case 'figure': {
       for (const fam of familiesData as Family[]) {
@@ -49,6 +54,73 @@ function findEntity(type: EntityType, id: string): Entity | null {
     default:
       return null;
   }
+}
+
+function stubFromLineage(id: string, type: 'tribe' | 'family'): Entity | null {
+  const node = (lineageData as any).nodes.find((n: any) => n.id === id);
+  if (!node) return null;
+
+  // Find connections from lineage edges
+  const connections = (lineageData as any).edges
+    .filter((e: any) => e.source === id || e.target === id)
+    .slice(0, 10)
+    .map((e: any) => ({
+      targetId: e.source === id ? e.target : e.source,
+      type: e.edgeType,
+      description: e.label || e.edgeType.replace(/_/g, ' '),
+    }));
+
+  const chain = (lineageData as any).ancestryChains?.[id];
+
+  if (type === 'tribe') {
+    return {
+      type: 'tribe',
+      data: {
+        id: node.id,
+        name: node.name,
+        nameAr: '',
+        lineageRoot: node.lineage || 'unknown',
+        regions: [],
+        subTribes: [],
+        relations: connections,
+        description: chain
+          ? `Lineage: ${chain.map((c: string) => {
+              const n = (lineageData as any).nodes.find((nd: any) => nd.id === c);
+              return n?.name || c;
+            }).join(' → ')}`
+          : `${node.nodeType.replace(/_/g, ' ')} in the tribal genealogy network.`,
+        keyInsight: node.nodeType === 'confederation' ? 'Confederation' : null,
+        migrationPath: [],
+        notableFigures: [],
+        timelineEvents: [],
+        folkLegends: [],
+        nameEtymology: null,
+      } as unknown as Tribe,
+    };
+  }
+  return {
+    type: 'family',
+    data: {
+      id: node.id,
+      name: node.name,
+      nameAr: '',
+      country: '',
+      regions: [],
+      tribeId: null,
+      tribalOrigin: null,
+      connections,
+      description: `${node.name} — entry from tribal genealogy graph.`,
+      keyInsight: node.isRuling ? `Rules over ${node.rulesOver || 'unknown'}` : null,
+      isRuling: node.isRuling || false,
+      rulesOver: node.rulesOver || null,
+      familyType: node.familyType || null,
+      notableFigures: [],
+      migrationPath: [],
+      timelineEvents: [],
+      folkLegends: [],
+      nameEtymology: null,
+    } as unknown as Family,
+  };
 }
 
 function AppContent() {
@@ -78,6 +150,7 @@ function AppContent() {
           <Route path="/tree" element={<TreeView />} />
           <Route path="/timeline" element={<TimelineView />} />
           <Route path="/connections" element={<ConnectionsView />} />
+          <Route path="/lineage" element={<LineageExplorer onSelectEntity={handleSelectEntity} />} />
           {/* Catch-all: redirect unknown routes to search */}
           <Route path="*" element={<SearchView onSelectEntity={handleSelectEntity} />} />
         </Routes>
@@ -91,7 +164,7 @@ function AppContent() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/gcc">
       <AppContent />
     </BrowserRouter>
   );
