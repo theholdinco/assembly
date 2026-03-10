@@ -770,8 +770,8 @@ export default function LineageExplorer({ onSelectEntity }: Props) {
 
       {/* Controls Panel */}
       <div
-        className="absolute top-4 left-4 z-40 flex flex-col gap-3 rounded-xl border border-border bg-bg-raised/90 p-4 text-sm text-text max-h-[calc(100vh-8rem)] overflow-y-auto"
-        style={{ backdropFilter: 'blur(12px)', width: 220 }}
+        className="absolute top-2 left-2 sm:top-4 sm:left-4 z-40 flex flex-col gap-3 rounded-xl border border-border bg-bg-raised/90 p-3 sm:p-4 text-sm text-text max-h-[calc(100vh-8rem)] overflow-y-auto w-[180px] sm:w-[220px]"
+        style={{ backdropFilter: 'blur(12px)' }}
       >
         <h3 className="font-display text-lg font-semibold text-accent">Lineage</h3>
 
@@ -819,7 +819,7 @@ export default function LineageExplorer({ onSelectEntity }: Props) {
           <div className="flex gap-1">
             <button
               onClick={() => setLayoutMode('force')}
-              className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              className={`flex-1 rounded px-2 py-2 text-xs font-medium transition-colors cursor-pointer ${
                 layoutMode === 'force'
                   ? 'bg-accent/20 text-accent border border-accent/40'
                   : 'bg-bg-subtle border border-border text-text-secondary hover:bg-bg-subtle/80'
@@ -829,7 +829,7 @@ export default function LineageExplorer({ onSelectEntity }: Props) {
             </button>
             <button
               onClick={() => setLayoutMode('hierarchical')}
-              className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              className={`flex-1 rounded px-2 py-2 text-xs font-medium transition-colors cursor-pointer ${
                 layoutMode === 'hierarchical'
                   ? 'bg-accent/20 text-accent border border-accent/40'
                   : 'bg-bg-subtle border border-border text-text-secondary hover:bg-bg-subtle/80'
@@ -912,7 +912,7 @@ export default function LineageExplorer({ onSelectEntity }: Props) {
       {/* Breadcrumb Bar */}
       {ancestryChainNames.length > 0 && (
         <div
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 rounded-xl border border-border bg-bg-raised/95 px-4 py-2.5 text-sm text-text"
+          className="absolute bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 rounded-xl border border-border bg-bg-raised/95 px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm text-text"
           style={{
             backdropFilter: 'blur(12px)',
             maxWidth: 'calc(100vw - 2rem)',
@@ -946,7 +946,7 @@ export default function LineageExplorer({ onSelectEntity }: Props) {
 
       {/* Legend */}
       <div
-        className="absolute bottom-4 right-4 z-40 rounded-xl border border-border bg-bg-raised/90 p-3 text-xs text-text"
+        className="absolute bottom-2 right-2 sm:bottom-4 sm:right-4 z-40 rounded-xl border border-border bg-bg-raised/90 p-2 sm:p-3 text-xs text-text hidden sm:block"
         style={{ backdropFilter: 'blur(12px)' }}
       >
         <div className="font-semibold mb-2 opacity-70 uppercase tracking-wide">Legend</div>

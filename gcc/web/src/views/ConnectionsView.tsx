@@ -353,11 +353,8 @@ export default function ConnectionsView({ onSelectEntity }: Props) {
 
       {/* Controls Panel */}
       <div
-        className="absolute top-4 left-4 z-40 flex flex-col gap-3 rounded-xl border border-border bg-bg-raised/90 p-4 text-sm text-text max-h-[calc(100vh-8rem)] overflow-y-auto"
-        style={{
-          backdropFilter: 'blur(12px)',
-          width: 220,
-        }}
+        className="absolute top-2 left-2 sm:top-4 sm:left-4 z-40 flex flex-col gap-3 rounded-xl border border-border bg-bg-raised/90 p-3 sm:p-4 text-sm text-text max-h-[calc(100vh-8rem)] overflow-y-auto w-[180px] sm:w-[220px]"
+        style={{ backdropFilter: 'blur(12px)' }}
       >
         <h3 className="font-display text-lg font-semibold text-accent">Connections</h3>
 

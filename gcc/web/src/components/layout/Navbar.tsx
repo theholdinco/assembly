@@ -172,7 +172,7 @@ export default function Navbar({ onSelectEntity }: NavbarProps) {
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden p-2 text-text"
+            className="md:hidden p-3 -mr-2 text-text"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle menu"
           >
@@ -215,7 +215,7 @@ export default function Navbar({ onSelectEntity }: NavbarProps) {
                   to={item.to}
                   end={item.to === '/'}
                   className={({ isActive }) =>
-                    `flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    `flex items-center gap-2 px-3 py-3 rounded-lg text-sm font-medium transition-colors ${
                       isActive
                         ? 'bg-accent/10 text-accent'
                         : 'text-text-secondary hover:bg-bg-subtle'

@@ -130,18 +130,18 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
     <div className="min-h-[calc(100vh-4rem)]">
       {/* Hero Section */}
       <section className="relative">
-        <div className="relative max-w-4xl mx-auto px-4 pt-20 pb-10 md:pt-32 md:pb-14">
+        <div className="relative max-w-4xl mx-auto px-4 pt-12 pb-8 sm:pt-20 sm:pb-10 md:pt-32 md:pb-14">
           {/* Title */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-center mb-12"
+            className="text-center mb-8 sm:mb-12"
           >
-            <h1 className="font-display text-5xl md:text-7xl font-bold text-text mb-4 tracking-tight">
+            <h1 className="font-display text-3xl sm:text-5xl md:text-7xl font-bold text-text mb-3 sm:mb-4 tracking-tight">
               Look Them Up
             </h1>
-            <p className="font-body text-text-secondary text-lg md:text-xl max-w-xl mx-auto">
+            <p className="font-body text-text-secondary text-base sm:text-lg md:text-xl max-w-xl mx-auto">
               Search any family name, tribe, or figure from the Arabian Gulf
             </p>
           </motion.div>
@@ -170,8 +170,8 @@ export default function SearchView({ onSelectEntity }: SearchViewProps) {
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
                 placeholder="Search a family name, tribe, or person..."
-                className="w-full bg-white rounded-2xl py-5 pl-14 pr-12
-                           font-body text-lg text-text placeholder:text-text-tertiary
+                className="w-full bg-white rounded-2xl py-3.5 sm:py-5 pl-12 sm:pl-14 pr-10 sm:pr-12
+                           font-body text-base sm:text-lg text-text placeholder:text-text-tertiary
                            outline-none border-none"
               />
               {query && (
@@ -226,7 +226,7 @@ function NameOriginCard({
       initial={{ opacity: 0, y: 20, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.4 }}
-      className="relative bg-bg-raised border border-border rounded-2xl p-6 md:p-8 mb-8
+      className="relative bg-bg-raised border border-border rounded-2xl p-4 sm:p-6 md:p-8 mb-6 sm:mb-8
                  shadow-sm"
     >
       <div className="flex flex-col md:flex-row md:items-start gap-6">
@@ -243,7 +243,7 @@ function NameOriginCard({
             )}
           </div>
 
-          <h2 className="font-display text-3xl md:text-4xl font-bold text-text mb-1">
+          <h2 className="font-display text-2xl sm:text-3xl md:text-4xl font-bold text-text mb-1">
             {match.surname}
           </h2>
           {match.meaning && (
@@ -429,7 +429,7 @@ function EmptyState({ onNavigate }: { onNavigate: (path: string) => void }) {
         <p className="text-text-tertiary text-sm">Browse by category</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto">
         {EXPLORE_CATEGORIES.map((cat, i) => (
           <motion.button
             key={cat.title}
@@ -440,7 +440,7 @@ function EmptyState({ onNavigate }: { onNavigate: (path: string) => void }) {
             whileHover={{ y: -3 }}
             whileTap={{ scale: 0.98 }}
             className="group relative bg-bg-raised border border-border
-                       rounded-2xl p-6 text-left cursor-pointer
+                       rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left cursor-pointer
                        hover:border-border-strong hover:shadow-md
                        transition-all duration-300"
           >

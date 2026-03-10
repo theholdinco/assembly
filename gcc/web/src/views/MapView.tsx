@@ -733,9 +733,9 @@ export default function MapView() {
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
       {/* Header */}
-      <div className="px-6 pt-6 pb-3 flex items-end justify-between flex-wrap gap-4">
+      <div className="px-3 sm:px-6 pt-4 sm:pt-6 pb-3 flex items-end justify-between flex-wrap gap-3 sm:gap-4">
         <div>
-          <h1 className="font-display text-3xl font-bold text-text">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-text">
             The Gulf
           </h1>
           <p className="text-text-tertiary text-sm mt-1">
@@ -770,12 +770,12 @@ export default function MapView() {
                 }}
                 onFocus={() => setTribeDropdownOpen(true)}
                 placeholder="Search tribe / family..."
-                className="text-xs bg-bg-subtle border border-border rounded-lg px-3 py-1.5 text-text w-48
+                className="text-xs bg-bg-subtle border border-border rounded-lg px-3 py-2 text-text w-full sm:w-48
                            focus:outline-none focus:ring-1 focus:ring-accent placeholder:text-text-tertiary"
               />
             )}
             {tribeDropdownOpen && !selectedTribe && (
-              <div className="absolute top-full left-0 mt-1 w-64 max-h-56 overflow-y-auto z-50
+              <div className="absolute top-full left-0 mt-1 w-full sm:w-64 max-h-56 overflow-y-auto z-50
                              bg-bg-raised border border-border rounded-xl shadow-lg">
                 {tribeSearchResults.length === 0 ? (
                   <div className="px-3 py-2 text-xs text-text-tertiary">No results</div>
@@ -828,7 +828,7 @@ export default function MapView() {
         </div>
       </div>
 
-      <div className="h-px bg-border mx-6" />
+      <div className="h-px bg-border mx-3 sm:mx-6" />
 
       {/* Map + sidebar */}
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -991,12 +991,12 @@ export default function MapView() {
           {selectedRegion && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 340, opacity: 1 }}
+              animate={{ width: typeof window !== 'undefined' && window.innerWidth < 640 ? window.innerWidth : 340, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="border-l border-border bg-bg-raised overflow-y-auto overflow-x-hidden shrink-0"
+              className="border-l border-border bg-bg-raised overflow-y-auto overflow-x-hidden shrink-0 absolute sm:relative right-0 top-0 bottom-0 z-20 sm:z-auto"
             >
-              <div className="p-5 w-[340px]">
+              <div className="p-4 sm:p-5 w-screen sm:w-[340px]">
                 <button
                   onClick={() => setSelectedRegion(null)}
                   className="float-right text-text-tertiary hover:text-text text-lg leading-none cursor-pointer"

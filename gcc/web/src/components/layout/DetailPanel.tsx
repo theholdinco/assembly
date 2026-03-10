@@ -130,9 +130,9 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed top-0 right-0 bottom-0 w-full max-w-lg z-50 bg-bg border-l border-border shadow-2xl overflow-y-auto"
+            className="fixed top-0 right-0 bottom-0 w-full max-w-full sm:max-w-lg z-50 bg-bg border-l border-border shadow-2xl overflow-y-auto"
           >
-            <div className="p-6 pt-20">
+            <div className="p-4 sm:p-6 pt-20">
               {/* Close button */}
               <button
                 onClick={onClose}
@@ -152,7 +152,7 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 {entity.type === 'family' && (entity.data as any).entityClassification === 'tribe+family' && (
                   <span className="badge-tribe text-xs px-2 py-0.5 rounded-full font-medium ml-1">Tribe</span>
                 )}
-                <h2 className="font-display text-3xl font-bold text-text mt-2">
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-text mt-2">
                   {getName(entity)}
                 </h2>
               </div>
@@ -388,7 +388,7 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                       onClose();
                       navigate(`/map?entity=${entity.type}:${entity.data.id}`);
                     }}
-                    className="px-4 py-2 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
+                    className="px-4 py-2.5 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
                   >
                     Show in Map
                   </button>
@@ -396,7 +396,7 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 {(entity.type === 'tribe' || entity.type === 'family') && (
                   <button
                     onClick={() => { onClose(); navigate('/lineage'); }}
-                    className="px-4 py-2 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
+                    className="px-4 py-2.5 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
                   >
                     Show in Lineage
                   </button>
@@ -404,7 +404,7 @@ export default function DetailPanel({ entity, onClose, onNavigate }: DetailPanel
                 {entity.type === 'event' && (
                   <button
                     onClick={() => { onClose(); navigate('/timeline'); }}
-                    className="px-4 py-2 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
+                    className="px-4 py-2.5 text-sm font-medium bg-bg-subtle text-text border border-border rounded-lg hover:border-border-strong transition-colors"
                   >
                     Show in Timeline
                   </button>
