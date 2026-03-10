@@ -962,6 +962,28 @@ export interface ParsedScreening {
   raw: string;
 }
 
+export interface BuyListItem {
+  id: string;
+  profileId: string;
+  obligorName: string;
+  facilityName: string | null;
+  sector: string | null;
+  moodysRating: string | null;
+  spRating: string | null;
+  spreadBps: number | null;
+  referenceRate: string | null;
+  price: number | null;
+  maturityDate: string | null;
+  facilitySize: number | null;
+  leverage: number | null;
+  interestCoverage: number | null;
+  isCovLite: boolean | null;
+  averageLifeYears: number | null;
+  recoveryRate: number | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 export interface QuestionnaireStep {
   id: string;
   title: string;

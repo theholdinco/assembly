@@ -842,3 +842,30 @@ CREATE INDEX IF NOT EXISTS idx_clo_follow_ups_panel ON clo_follow_ups(panel_id);
 -- CLO screening-level follow-ups
 ALTER TABLE clo_follow_ups ADD COLUMN IF NOT EXISTS screening_id UUID REFERENCES clo_screenings(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_clo_follow_ups_screening ON clo_follow_ups(screening_id);
+
+-- ============================================================
+-- CLO Buy List — candidate loans for purchase consideration
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS clo_buy_list_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id UUID NOT NULL REFERENCES clo_profiles(id) ON DELETE CASCADE,
+  obligor_name TEXT NOT NULL,
+  facility_name TEXT,
+  sector TEXT,
+  moodys_rating TEXT,
+  sp_rating TEXT,
+  spread_bps NUMERIC,
+  reference_rate TEXT,
+  price NUMERIC,
+  maturity_date TEXT,
+  facility_size NUMERIC,
+  leverage NUMERIC,
+  interest_coverage NUMERIC,
+  is_cov_lite BOOLEAN,
+  average_life_years NUMERIC,
+  recovery_rate NUMERIC,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_clo_buy_list_items_profile ON clo_buy_list_items(profile_id);
