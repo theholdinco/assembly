@@ -9,6 +9,8 @@ import UpdateComplianceReport from "./UpdateComplianceReport";
 import DataQualityBadge from "./DataQualityBadge";
 import DocumentUploadBanner from "./DocumentUploadBanner";
 import BriefingCard from "@/components/BriefingCard";
+import BuyListUpload from "./BuyListUpload";
+import { getBuyListForProfile } from "@/lib/clo/buy-list";
 
 function CLOHealthSummary({ constraints }: { constraints: Record<string, unknown> | null }) {
   if (!constraints || Object.keys(constraints).length === 0) return null;
@@ -696,6 +698,7 @@ export default async function CLODashboard() {
   }
 
   const cloProfile = rowToProfile(profile as unknown as Record<string, unknown>);
+  const buyListItems = await getBuyListForProfile(cloProfile.id);
   const portfolio = cloProfile.extractedPortfolio;
   const documentMeta = await getProfileDocumentMeta(session.user.id);
   const hasDocuments = documentMeta.length > 0;
@@ -797,6 +800,8 @@ export default async function CLODashboard() {
       <BriefingCard product="clo" />
 
       <DocumentUploadBanner hasDocuments={hasDocuments} />
+
+      <BuyListUpload initialItems={buyListItems} />
 
       {documentMeta.length > 0 && (
         <section className="ic-section">

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AttachmentWidget, { type AttachedFile } from "@/components/AttachmentWidget";
+import BuyListLoanSelector from "./BuyListLoanSelector";
+import type { BuyListItem } from "@/lib/clo/types";
 
 type AnalysisType = "buy" | "switch";
 
@@ -44,6 +46,61 @@ export default function AnalysisForm() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  function applyBuyListItem(
+    item: BuyListItem,
+    setters: {
+      setBorrowerName: (v: string) => void;
+      setSector: (v: string) => void;
+      setSpreadCoupon: (v: string) => void;
+      setRating: (v: string) => void;
+      setMaturity: (v: string) => void;
+      setFacilitySize: (v: string) => void;
+      setLeverage: (v: string) => void;
+      setInterestCoverage: (v: string) => void;
+      setCovenantsSummary: (v: string) => void;
+      setNotes: (v: string) => void;
+    }
+  ) {
+    setters.setBorrowerName(item.obligorName);
+    setters.setSector(item.sector ?? "");
+    if (item.spreadBps != null) {
+      const ref = item.referenceRate || "SOFR";
+      setters.setSpreadCoupon(`${ref} + ${item.spreadBps}bps`);
+    }
+    const ratingParts = [item.moodysRating, item.spRating].filter(Boolean);
+    setters.setRating(ratingParts.join("/"));
+    setters.setMaturity(item.maturityDate ?? "");
+    setters.setFacilitySize(item.facilitySize != null ? `$${item.facilitySize.toLocaleString()}` : "");
+    setters.setLeverage(item.leverage != null ? `${item.leverage}x` : "");
+    setters.setInterestCoverage(item.interestCoverage != null ? `${item.interestCoverage}x` : "");
+    setters.setCovenantsSummary(item.isCovLite ? "Covenant-lite" : "");
+    setters.setNotes(item.notes ?? "");
+  }
+
+  function handleBuyListSelect(item: BuyListItem) {
+    applyBuyListItem(item, {
+      setBorrowerName, setSector, setSpreadCoupon, setRating,
+      setMaturity, setFacilitySize, setLeverage, setInterestCoverage,
+      setCovenantsSummary, setNotes,
+    });
+    if (!title.trim()) setTitle(`Buy Analysis: ${item.obligorName}`);
+  }
+
+  function handleSwitchBuyListSelect(item: BuyListItem) {
+    applyBuyListItem(item, {
+      setBorrowerName: setSwitchBorrowerName,
+      setSector: setSwitchSector,
+      setSpreadCoupon: setSwitchSpreadCoupon,
+      setRating: setSwitchRating,
+      setMaturity: setSwitchMaturity,
+      setFacilitySize: setSwitchFacilitySize,
+      setLeverage: setSwitchLeverage,
+      setInterestCoverage: setSwitchInterestCoverage,
+      setCovenantsSummary: setSwitchCovenantsSummary,
+      setNotes: setSwitchNotes,
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -380,6 +437,8 @@ export default function AnalysisForm() {
         </h3>
       )}
 
+      <BuyListLoanSelector onSelect={handleBuyListSelect} />
+
       {renderLoanFields(
         "primary",
         { borrowerName, sector, loanType, spreadCoupon, rating, maturity, facilitySize, leverage, interestCoverage, covenantsSummary, ebitda, revenue, companyDescription, notes },
@@ -391,6 +450,7 @@ export default function AnalysisForm() {
           <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", marginTop: "1.5rem" }}>
             Target Loan (Buy)
           </h3>
+          <BuyListLoanSelector onSelect={handleSwitchBuyListSelect} />
           {renderLoanFields(
             "switch",
             {
