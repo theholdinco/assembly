@@ -1,5 +1,30 @@
 import type { CloProfile, PanelMember, LoanAnalysis, ExtractedPortfolio, ExtractedConstraints, CloPoolSummary, CloComplianceTest, CloConcentration, CloEvent, CloExtractionOverflow, BuyListItem } from "../lib/clo/types.js";
-import { formatBuyList } from "@/lib/clo/buy-list";
+
+function formatBuyList(items: BuyListItem[]): string {
+  if (items.length === 0) return "";
+  return items
+    .map((item) => {
+      const parts: string[] = [`Obligor: ${item.obligorName}`];
+      if (item.facilityName) parts.push(`Facility: ${item.facilityName}`);
+      if (item.sector) parts.push(`Sector: ${item.sector}`);
+      if (item.moodysRating || item.spRating) {
+        const ratings = [item.moodysRating, item.spRating].filter(Boolean).join("/");
+        parts.push(`Rating: ${ratings}`);
+      }
+      if (item.spreadBps != null) parts.push(`Spread: ${item.spreadBps}bps`);
+      if (item.price != null) parts.push(`Price: ${item.price}`);
+      if (item.maturityDate) parts.push(`Maturity: ${item.maturityDate}`);
+      if (item.facilitySize != null) parts.push(`Size: ${item.facilitySize}`);
+      if (item.leverage != null) parts.push(`Leverage: ${item.leverage}x`);
+      if (item.interestCoverage != null) parts.push(`IC: ${item.interestCoverage}x`);
+      if (item.isCovLite != null) parts.push(`Cov-Lite: ${item.isCovLite ? "Yes" : "No"}`);
+      if (item.averageLifeYears != null) parts.push(`Avg Life: ${item.averageLifeYears}y`);
+      if (item.recoveryRate != null) parts.push(`Recovery: ${item.recoveryRate}%`);
+      if (item.notes) parts.push(`Notes: ${item.notes}`);
+      return parts.join(" | ");
+    })
+    .join("\n");
+}
 
 const QUALITY_RULES = `
 ## Quality Rules
