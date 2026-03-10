@@ -1,5 +1,5 @@
 import type { CloProfile, PanelMember, LoanAnalysis, ExtractedPortfolio, ExtractedConstraints, CloPoolSummary, CloComplianceTest, CloConcentration, CloEvent, CloExtractionOverflow, BuyListItem } from "../lib/clo/types.js";
-import { formatBuyList } from "../lib/clo/buy-list.js";
+import { formatBuyList } from "@/lib/clo/buy-list";
 
 const QUALITY_RULES = `
 ## Quality Rules
