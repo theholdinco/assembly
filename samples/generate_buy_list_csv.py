@@ -20,18 +20,40 @@ def main():
     out_path = os.path.join(os.path.dirname(__file__), "sample_buy_list.csv")
 
     fieldnames = [
-        "obligorName", "facilityName", "sector", "moodysRating", "spRating",
-        "spreadBps", "referenceRate", "price", "maturityDate", "facilitySize",
-        "leverage", "interestCoverage", "isCovLite", "averageLifeYears", "recoveryRate",
+        "obligor_name", "facility_name", "sector", "moodys_rating", "sp_rating",
+        "spread_bps", "reference_rate", "price", "maturity_date", "facility_size",
+        "leverage", "interest_coverage", "cov_lite", "average_life", "recovery_rate",
     ]
+
+    # Map from internal keys to CSV column names
+    key_to_col = {
+        "obligorName": "obligor_name",
+        "facilityName": "facility_name",
+        "sector": "sector",
+        "moodysRating": "moodys_rating",
+        "spRating": "sp_rating",
+        "spreadBps": "spread_bps",
+        "referenceRate": "reference_rate",
+        "price": "price",
+        "maturityDate": "maturity_date",
+        "facilitySize": "facility_size",
+        "leverage": "leverage",
+        "interestCoverage": "interest_coverage",
+        "isCovLite": "cov_lite",
+        "averageLifeYears": "average_life",
+        "recoveryRate": "recovery_rate",
+    }
 
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for item in items:
-            row = {k: item[k] for k in fieldnames}
-            # Format booleans as TRUE/FALSE for CSV clarity
-            row["isCovLite"] = "TRUE" if row["isCovLite"] else "FALSE"
+            row = {}
+            for internal_key, col_name in key_to_col.items():
+                val = item[internal_key]
+                if internal_key == "isCovLite":
+                    val = "TRUE" if val else "FALSE"
+                row[col_name] = val
             writer.writerow(row)
 
     print(f"Generated: {out_path}")

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AttachmentWidget, { type AttachedFile } from "@/components/AttachmentWidget";
 import BuyListLoanSelector from "./BuyListLoanSelector";
-import type { BuyListItem } from "@/lib/clo/types";
+import PortfolioHoldingSelector from "./PortfolioHoldingSelector";
+import type { BuyListItem, CloHolding } from "@/lib/clo/types";
 
 type AnalysisType = "buy" | "switch";
 
@@ -87,6 +88,46 @@ export default function AnalysisForm() {
     if (!title.trim()) setTitle(`Buy Analysis: ${item.obligorName}`);
   }
 
+  function applyHolding(
+    h: CloHolding,
+    setters: {
+      setBorrowerName: (v: string) => void;
+      setSector: (v: string) => void;
+      setLoanType: (v: string) => void;
+      setSpreadCoupon: (v: string) => void;
+      setRating: (v: string) => void;
+      setMaturity: (v: string) => void;
+      setFacilitySize: (v: string) => void;
+      setCovenantsSummary: (v: string) => void;
+    }
+  ) {
+    setters.setBorrowerName(h.obligorName ?? "");
+    setters.setSector(h.moodysIndustry ?? h.industryDescription ?? "");
+    setters.setLoanType(h.assetType ?? "");
+    if (h.spreadBps != null) {
+      const ref = h.referenceRate || "SOFR";
+      setters.setSpreadCoupon(`${ref} + ${h.spreadBps}bps`);
+    }
+    const ratingParts = [h.moodysRating, h.spRating].filter(Boolean);
+    setters.setRating(ratingParts.join("/"));
+    setters.setMaturity(h.maturityDate ?? "");
+    setters.setFacilitySize(h.parBalance != null ? `$${h.parBalance.toLocaleString()}` : "");
+    setters.setCovenantsSummary(h.isCovLite ? "Covenant-lite" : "");
+  }
+
+  function handlePortfolioSelect(h: CloHolding) {
+    applyHolding(h, {
+      setBorrowerName, setSector, setLoanType, setSpreadCoupon,
+      setRating, setMaturity, setFacilitySize, setCovenantsSummary,
+    });
+    const sellName = h.obligorName ?? "Current";
+    if (switchBorrowerName) {
+      setTitle(`Switch: ${sellName} → ${switchBorrowerName}`);
+    } else if (!title.trim()) {
+      setTitle(`Switch: ${sellName}`);
+    }
+  }
+
   function handleSwitchBuyListSelect(item: BuyListItem) {
     applyBuyListItem(item, {
       setBorrowerName: setSwitchBorrowerName,
@@ -100,6 +141,10 @@ export default function AnalysisForm() {
       setCovenantsSummary: setSwitchCovenantsSummary,
       setNotes: setSwitchNotes,
     });
+    // Update title if sell side is already filled
+    if (borrowerName && !title.includes(item.obligorName)) {
+      setTitle(`Switch: ${borrowerName} → ${item.obligorName}`);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -437,7 +482,11 @@ export default function AnalysisForm() {
         </h3>
       )}
 
-      <BuyListLoanSelector onSelect={handleBuyListSelect} />
+      {analysisType === "switch" ? (
+        <PortfolioHoldingSelector onSelect={handlePortfolioSelect} />
+      ) : (
+        <BuyListLoanSelector onSelect={handleBuyListSelect} />
+      )}
 
       {renderLoanFields(
         "primary",

@@ -41,6 +41,12 @@ function formatAmount(val: number): string {
   return `$${val.toFixed(0)}`;
 }
 
+function formatDate(isoDate: string): string {
+  const [y, m] = isoDate.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[parseInt(m, 10) - 1]} ${y.slice(2)}`;
+}
+
 const TRANCHE_COLORS = [
   "#2d6a4f", "#5a7c2f", "#92641a", "#b54a32", "#7c3aed", "#2563eb",
 ];
@@ -538,7 +544,7 @@ export default function ProjectionModel({
                               textShadow: "0 1px 2px rgba(0,0,0,0.2)",
                             }}
                           >
-                            {payoffQ !== null ? `Q${payoffQ}` : "—"}
+                            {payoffQ !== null ? formatDate(result.periods[payoffQ - 1]?.date ?? "") : "—"}
                           </span>
                         </div>
                       </div>
@@ -593,7 +599,7 @@ export default function ProjectionModel({
                   return (
                     <div
                       key={p.periodNum}
-                      title={`Q${p.periodNum}: ${formatAmount(p.endingPar)}`}
+                      title={`${formatDate(p.date)}: ${formatAmount(p.endingPar)}`}
                       style={{
                         flex: 1,
                         height: `${heightPct}%`,
@@ -611,8 +617,8 @@ export default function ProjectionModel({
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.65rem", color: "var(--color-text-muted)", marginTop: "0.35rem", fontFamily: "var(--font-mono)" }}>
-              <span>Q1</span>
-              <span>Q{result.periods.length}</span>
+              <span>{formatDate(result.periods[0]?.date ?? "")}</span>
+              <span>{formatDate(result.periods[result.periods.length - 1]?.date ?? "")}</span>
             </div>
           </div>
 
@@ -655,7 +661,7 @@ export default function ProjectionModel({
                 >
                   <thead>
                     <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "right", background: "var(--color-surface)" }}>
-                      <th style={{ padding: "0.5rem 0.6rem", textAlign: "left", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Qtr</th>
+                      <th style={{ padding: "0.5rem 0.6rem", textAlign: "left", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Date</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Beg Par</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Defaults</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Prepays</th>
@@ -672,7 +678,7 @@ export default function ProjectionModel({
                   <tbody>
                     {result.periods.map((p) => (
                       <tr key={p.periodNum} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
-                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>Q{p.periodNum}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatDate(p.date)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningPar)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.defaults > 0 ? "var(--color-low)" : undefined }}>
                           {formatAmount(p.defaults)}
