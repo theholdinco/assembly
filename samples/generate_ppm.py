@@ -89,13 +89,13 @@ def generate():
 
     pdf.set_font("Helvetica", "", 10)
     notes = [
-        "USD 148,000,000 Class A-1 Senior Secured Floating Rate Notes due 2037",
+        "USD 240,000,000 Class A-1 Senior Secured Floating Rate Notes due 2037",
         "USD 20,000,000 Class A-2 Senior Secured Floating Rate Notes due 2037",
-        "USD 24,000,000 Class B Senior Secured Floating Rate Notes due 2037",
-        "USD 16,500,000 Class C Secured Deferrable Floating Rate Notes due 2037",
-        "USD 14,000,000 Class D Secured Deferrable Floating Rate Notes due 2037",
-        "USD 10,000,000 Class E Secured Deferrable Floating Rate Notes due 2037",
-        "USD 10,000,000 Subordinated Notes due 2037",
+        "USD 32,000,000 Class B Senior Secured Floating Rate Notes due 2037",
+        "USD 24,000,000 Class C Secured Deferrable Floating Rate Notes due 2037",
+        "USD 20,000,000 Class D Secured Deferrable Floating Rate Notes due 2037",
+        "USD 14,000,000 Class E Secured Deferrable Floating Rate Notes due 2037",
+        "USD 50,000,000 Subordinated Notes due 2037",
     ]
     for n in notes:
         pdf.cell(0, 7, n, align="C", new_x="LMARGIN", new_y="NEXT")
@@ -178,24 +178,24 @@ def generate():
     pdf.table_header(cols, widths)
 
     tranches = [
-        ["A-1", "Sr Sec Fltg Rate", "$148,000,000", "Floating", "SOFR", "145", "AAA", "AAA", "No", "04/15/2037"],
+        ["A-1", "Sr Sec Fltg Rate", "$240,000,000", "Floating", "SOFR", "145", "AAA", "AAA", "No", "04/15/2037"],
         ["A-2", "Sr Sec Fltg Rate", "$20,000,000", "Floating", "SOFR", "175", "AAA", "AAA", "No", "04/15/2037"],
-        ["B", "Sr Sec Fltg Rate", "$24,000,000", "Floating", "SOFR", "210", "AA", "AA", "No", "04/15/2037"],
-        ["C", "Sec Def Fltg Rate", "$16,500,000", "Floating", "SOFR", "275", "A", "A", "Yes", "04/15/2037"],
-        ["D", "Sec Def Fltg Rate", "$14,000,000", "Floating", "SOFR", "400", "BBB-", "BBB-", "Yes", "04/15/2037"],
-        ["E", "Sec Def Fltg Rate", "$10,000,000", "Floating", "SOFR", "650", "BB-", "BB-", "Yes", "04/15/2037"],
-        ["Sub", "Subordinated", "$10,000,000", "N/A", "N/A", "N/A", "NR", "NR", "N/A", "04/15/2037"],
+        ["B", "Sr Sec Fltg Rate", "$32,000,000", "Floating", "SOFR", "210", "AA", "AA", "No", "04/15/2037"],
+        ["C", "Sec Def Fltg Rate", "$24,000,000", "Floating", "SOFR", "275", "A", "A", "Yes", "04/15/2037"],
+        ["D", "Sec Def Fltg Rate", "$20,000,000", "Floating", "SOFR", "400", "BBB-", "BBB-", "Yes", "04/15/2037"],
+        ["E", "Sec Def Fltg Rate", "$14,000,000", "Floating", "SOFR", "650", "BB-", "BB-", "Yes", "04/15/2037"],
+        ["Sub", "Subordinated", "$50,000,000", "N/A", "N/A", "N/A", "NR", "NR", "N/A", "04/15/2037"],
     ]
     for row in tranches:
         pdf.table_row(row, widths, aligns)
 
     pdf.ln(6)
     pdf.sub_title("Deal Sizing")
-    pdf.label_value("Target Par Amount:", "$242,500,000")
-    pdf.label_value("Total Rated Notes:", "$232,500,000")
-    pdf.label_value("Total Subordinated Notes:", "$10,000,000")
-    pdf.label_value("Total Deal Size:", "$242,500,000")
-    pdf.label_value("Equity % of Deal:", "4.12%")
+    pdf.label_value("Target Par Amount:", "$400,000,000")
+    pdf.label_value("Total Rated Notes:", "$350,000,000")
+    pdf.label_value("Total Subordinated Notes:", "$50,000,000")
+    pdf.label_value("Total Deal Size:", "$400,000,000")
+    pdf.label_value("Equity % of Deal:", "12.50%")
 
     pdf.ln(4)
     pdf.body_text(
@@ -425,8 +425,8 @@ def generate():
         ["Payment Account", "Distribution of interest and principal to noteholders"],
         ["Collection Account", "Collection of interest and principal from collateral"],
         ["Principal Collection", "Segregated account for principal proceeds"],
-        ["Interest Reserve", "Reserve for interest shortfalls ($1,250,000 initial)"],
-        ["Expense Reserve", "Reserve for senior expenses ($150,000 initial)"],
+        ["Interest Reserve", "Reserve for interest shortfalls ($2,150,000 initial)"],
+        ["Expense Reserve", "Reserve for senior expenses ($250,000 initial)"],
         ["Revolver Funding", "Funding commitments for revolving loans"],
         ["Custodial Account", "Custody of collateral obligations"],
     ]
@@ -555,7 +555,7 @@ def generate():
         ["OC Test Failure", "Class A or Class B OC Test fails for 2 consecutive payment dates"],
         ["Bankruptcy", "Issuer becomes subject to bankruptcy or insolvency proceedings"],
         ["Breach of Covenants", "Material breach of indenture covenants not cured within 30 days"],
-        ["Collateral Shortfall", "Portfolio principal balance falls below $50,000,000"],
+        ["Collateral Shortfall", "Portfolio principal balance falls below $80,000,000"],
     ]
     for row in events:
         pdf.table_row(row, widths_e, aligns_e)
@@ -605,7 +605,8 @@ def generate():
     )
 
     # Save
-    path = "/Users/solal/Documents/GitHub/funzies/samples/sample_ppm.pdf"
+    import os
+    path = os.path.join(os.path.dirname(__file__), "sample_ppm.pdf")
     pdf.output(path)
     print(f"Generated: {path} ({pdf.page_no()} pages)")
 

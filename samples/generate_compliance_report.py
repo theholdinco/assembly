@@ -3,9 +3,12 @@
 
 All summary statistics are derived from the actual holdings data to ensure
 internal consistency for testing the extraction pipeline.
+
+Uses real leveraged loan issuers from real_loan_data.py.
 """
 
 from fpdf import FPDF
+from real_loan_data import WARF_MAP, build_holdings
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Shared deal data (must match generate_ppm.py)
@@ -16,85 +19,21 @@ COLLATERAL_MANAGER = "Elmwood Asset Management LLC"
 TRUSTEE = "The Bank of New York Mellon"
 
 TRANCHES = [
-    {"class": "A-1", "original": 148_000_000, "spread_bps": 145, "rating": "AAA/AAA", "deferrable": False},
+    {"class": "A-1", "original": 240_000_000, "spread_bps": 145, "rating": "AAA/AAA", "deferrable": False},
     {"class": "A-2", "original": 20_000_000,  "spread_bps": 175, "rating": "AAA/AAA", "deferrable": False},
-    {"class": "B",   "original": 24_000_000,  "spread_bps": 210, "rating": "AA/AA",   "deferrable": False},
-    {"class": "C",   "original": 16_500_000,  "spread_bps": 275, "rating": "A/A",     "deferrable": True},
-    {"class": "D",   "original": 14_000_000,  "spread_bps": 400, "rating": "BBB-/BBB-", "deferrable": True},
-    {"class": "E",   "original": 10_000_000,  "spread_bps": 650, "rating": "BB-/BB-", "deferrable": True},
-    {"class": "Sub", "original": 10_000_000,  "spread_bps": None, "rating": "NR",     "deferrable": None},
+    {"class": "B",   "original": 32_000_000,  "spread_bps": 210, "rating": "AA/AA",   "deferrable": False},
+    {"class": "C",   "original": 24_000_000,  "spread_bps": 275, "rating": "A/A",     "deferrable": True},
+    {"class": "D",   "original": 20_000_000,  "spread_bps": 400, "rating": "BBB-/BBB-", "deferrable": True},
+    {"class": "E",   "original": 14_000_000,  "spread_bps": 650, "rating": "BB-/BB-", "deferrable": True},
+    {"class": "Sub", "original": 50_000_000,  "spread_bps": None, "rating": "NR",     "deferrable": None},
 ]
 
 BASE_RATE = 5.37  # 3m SOFR as of report date
 
-# Holdings — par amounts chosen to sum exactly to $242,500,000
-HOLDINGS = [
-    {"obligor": "Acme Industrial Corp",     "facility": "Term Loan B",   "isin": "US00123ABC45", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Capital Goods",           "moodys_ind": "Aerospace & Defense",    "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "06/15/2030", "par": 14_000_000, "price": 99.25, "spread_bps": 350, "moodys": "B1",  "sp": "B+",  "recovery": 50.0},
-    {"obligor": "Beta Healthcare Inc",      "facility": "First Lien TL", "isin": "US00234BCD56", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Healthcare",              "moodys_ind": "Healthcare & Pharma",    "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "03/20/2031", "par": 16_500_000, "price": 98.50, "spread_bps": 375, "moodys": "B2",  "sp": "B",   "recovery": 45.0},
-    {"obligor": "Cascade Tech Solutions",   "facility": "Term Loan",     "isin": "US00345CDE67", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Technology",              "moodys_ind": "High Tech Industries",   "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "09/30/2029", "par": 10_000_000, "price": 100.00, "spread_bps": 325, "moodys": "Ba3", "sp": "BB-", "recovery": 55.0},
-    {"obligor": "Delta Media Group",        "facility": "First Lien",    "isin": "US00456DEF78", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Media",                   "moodys_ind": "Broadcasting & Subscr",  "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "12/15/2030", "par": 11_250_000, "price": 96.75, "spread_bps": 425, "moodys": "B3",  "sp": "B-",  "recovery": 40.0},
-    {"obligor": "Eagle Financial Services", "facility": "Term Loan B",   "isin": "US00567EFG89", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Banking",                 "moodys_ind": "Banking, Finance",       "cov_lite": True,  "fixed": True,  "defaulted": False, "second_lien": False,
-     "maturity": "07/31/2028", "par": 8_500_000,  "price": 101.50, "spread_bps": None, "moodys": "Ba2", "sp": "BB",  "recovery": 60.0},
-    {"obligor": "Frontier Logistics LLC",   "facility": "First Lien TL", "isin": "US00678FGH90", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Transportation",          "moodys_ind": "Cargo Transport",        "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "11/30/2030", "par": 12_750_000, "price": 97.50, "spread_bps": 400, "moodys": "B2",  "sp": "B",   "recovery": 47.0},
-    {"obligor": "Global Packaging Corp",    "facility": "Term Loan",     "isin": "US00789GHI01", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Containers & Pack",       "moodys_ind": "Containers, Packaging",  "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "05/15/2031", "par": 10_500_000, "price": 99.00, "spread_bps": 350, "moodys": "B1",  "sp": "B+",  "recovery": 52.0},
-    {"obligor": "Harmony Hotels Inc",       "facility": "First Lien",    "isin": "US00890HIJ12", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Hotels & Leisure",        "moodys_ind": "Hotel, Gaming",          "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "08/20/2029", "par": 15_250_000, "price": 95.25, "spread_bps": 475, "moodys": "B3",  "sp": "B-",  "recovery": 38.0},
-    {"obligor": "Ironclad Manufacturing",   "facility": "Term Loan B",   "isin": "US00901IJK23", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Capital Goods",           "moodys_ind": "Machinery",              "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "02/28/2030", "par": 11_000_000, "price": 98.75, "spread_bps": 375, "moodys": "B1",  "sp": "B+",  "recovery": 48.0},
-    {"obligor": "Jupiter Software Ltd",     "facility": "First Lien TL", "isin": "US01012JKL34", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Technology",              "moodys_ind": "High Tech Industries",   "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "10/31/2031", "par": 18_000_000, "price": 100.25, "spread_bps": 300, "moodys": "Ba3", "sp": "BB-", "recovery": 55.0},
-    {"obligor": "Keystone Energy Partners", "facility": "Term Loan",     "isin": "US01123KLM45", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Energy",                  "moodys_ind": "Oil & Gas",              "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "04/15/2029", "par": 12_000_000, "price": 97.00, "spread_bps": 450, "moodys": "B2",  "sp": "B",   "recovery": 42.0},
-    {"obligor": "Lakewood Consumer Brands", "facility": "First Lien",    "isin": "US01234LMN56", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Consumer Products",       "moodys_ind": "Beverage, Food",         "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "01/31/2031", "par": 9_500_000,  "price": 99.50, "spread_bps": 325, "moodys": "B1",  "sp": "B+",  "recovery": 50.0},
-    {"obligor": "Meridian Chemicals AG",    "facility": "Euro TL B",     "isin": "XS0123456789", "type": "Senior Secured", "currency": "EUR", "country": "DE",
-     "industry": "Chemicals",               "moodys_ind": "Chemicals, Plastics",    "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "06/30/2030", "par": 13_500_000, "price": 98.25, "spread_bps": 400, "moodys": "B1",  "sp": "B+",  "recovery": 49.0},
-    {"obligor": "Nova Telecom Inc",         "facility": "Term Loan B",   "isin": "US01456NOP78", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Telecommunications",      "moodys_ind": "Telecommunications",     "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "09/15/2030", "par": 16_000_000, "price": 96.00, "spread_bps": 500, "moodys": "B3",  "sp": "B-",  "recovery": 35.0},
-    {"obligor": "Oakmont Pharma Group",     "facility": "First Lien TL", "isin": "US01567OPQ89", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Healthcare",              "moodys_ind": "Healthcare & Pharma",    "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "12/31/2030", "par": 10_750_000, "price": 100.50, "spread_bps": 275, "moodys": "Ba3", "sp": "BB-", "recovery": 57.0},
-    {"obligor": "Pinnacle Retail Holdings", "facility": "Term Loan",     "isin": "US01678PQR90", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Retail",                  "moodys_ind": "Retail Stores",          "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "03/31/2030", "par": 12_500_000, "price": 94.50, "spread_bps": 525, "moodys": "Caa1", "sp": "CCC+", "recovery": 30.0},
-    {"obligor": "Quantum Data Systems",     "facility": "Second Lien TL","isin": "US01789QRS01", "type": "Second Lien",   "currency": "USD", "country": "US",
-     "industry": "Technology",              "moodys_ind": "High Tech Industries",   "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": True,
-     "maturity": "11/30/2031", "par": 8_500_000,  "price": 93.00, "spread_bps": 700, "moodys": "Caa1", "sp": "CCC+", "recovery": 25.0},
-    {"obligor": "Redwood Building Materials","facility": "First Lien",   "isin": "US01890RST12", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Building Products",       "moodys_ind": "Building & Developmnt",  "cov_lite": False, "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "07/15/2029", "par": 7_750_000,  "price": 99.75, "spread_bps": 350, "moodys": "B1",  "sp": "B+",  "recovery": 52.0},
-    {"obligor": "Summit Education Partners", "facility": "Term Loan B",  "isin": "US01901STU23", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Services",                "moodys_ind": "Business Services",      "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "05/31/2030", "par": 14_500_000, "price": 97.25, "spread_bps": 425, "moodys": "B2",  "sp": "B",   "recovery": 44.0},
-    {"obligor": "Titan Aerospace Inc",      "facility": "First Lien TL", "isin": "US02012TUV34", "type": "Senior Secured", "currency": "USD", "country": "US",
-     "industry": "Aerospace",               "moodys_ind": "Aerospace & Defense",    "cov_lite": True,  "fixed": False, "defaulted": False, "second_lien": False,
-     "maturity": "08/31/2031", "par": 9_750_000,  "price": 100.00, "spread_bps": 300, "moodys": "Ba3", "sp": "BB-", "recovery": 58.0},
-]
+TOTAL_PAR = 400_000_000
+NUM_HOLDINGS = 120
+HOLDINGS = build_holdings(NUM_HOLDINGS, TOTAL_PAR, seed=42)
 
-# Moody's rating → WARF factor
-WARF_MAP = {"Aaa": 1, "Aa1": 10, "Aa2": 20, "Aa3": 40, "A1": 70, "A2": 120, "A3": 180,
-            "Baa1": 260, "Baa2": 360, "Baa3": 610, "Ba1": 940, "Ba2": 1350, "Ba3": 1766,
-            "B1": 2220, "B2": 2720, "B3": 3490, "Caa1": 4770, "Caa2": 6500, "Caa3": 8070}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Compute derived metrics from holdings
@@ -102,7 +41,6 @@ WARF_MAP = {"Aaa": 1, "Aa1": 10, "Aa2": 20, "Aa3": 40, "A1": 70, "A2": 120, "A3"
 
 def compute_metrics():
     total_par = sum(h["par"] for h in HOLDINGS)
-    assert total_par == 242_500_000, f"Holdings par sum is {total_par}, expected 242,500,000"
 
     n_assets = len(HOLDINGS)
     obligors = set(h["obligor"] for h in HOLDINGS)
@@ -153,7 +91,7 @@ def compute_metrics():
 
     # Diversity score (simplified: number of distinct Moody's industries)
     industries = set(h["moodys_ind"] for h in HOLDINGS)
-    diversity = len(industries) * 5 + 2  # rough approximation
+    diversity = len(industries) * 3 + 5  # rough approximation
 
     # Industry concentrations
     industry_par = {}
@@ -243,29 +181,29 @@ class ComplianceReportPDF(FPDF):
         self.cell(0, 6, str(value), new_x="LMARGIN", new_y="NEXT")
 
     def table_header(self, cols, widths):
-        self.set_font("Helvetica", "B", 8)
+        self.set_font("Helvetica", "B", 7)
         self.set_fill_color(220, 230, 241)
         for i, col in enumerate(cols):
             self.cell(widths[i], 7, col, border=1, fill=True, align="C")
         self.ln()
 
     def table_row(self, values, widths, aligns=None):
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Helvetica", "", 7)
         if aligns is None:
             aligns = ["L"] * len(values)
         for i, val in enumerate(values):
-            self.cell(widths[i], 6, str(val), border=1, align=aligns[i])
+            self.cell(widths[i], 5, str(val), border=1, align=aligns[i])
         self.ln()
 
 
 def generate():
     m = compute_metrics()
-    pdf = ComplianceReportPDF()
+    pdf = ComplianceReportPDF("L")  # Landscape for holdings tables
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=20)
 
     # ── Page 1: Cover ──
-    pdf.add_page()
+    pdf.add_page("P")  # Portrait for cover
     pdf.set_font("Helvetica", "B", 22)
     pdf.ln(30)
     pdf.cell(0, 12, DEAL_NAME.upper(), align="C", new_x="LMARGIN", new_y="NEXT")
@@ -285,8 +223,8 @@ def generate():
     pdf.set_font("Helvetica", "I", 9)
     pdf.cell(0, 7, "Collection Period: November 16, 2024 - December 15, 2024", align="C", new_x="LMARGIN", new_y="NEXT")
 
-    # ── Page 2-3: Compliance Summary ──
-    pdf.add_page()
+    # ── Compliance Summary ──
+    pdf.add_page("P")
     pdf.section_title("I. COMPLIANCE SUMMARY")
 
     pdf.sub_title("Deal Information")
@@ -301,7 +239,7 @@ def generate():
 
     pdf.sub_title("Collateral Summary")
     pdf.label_value("Adjusted Collateral Principal Amount:", fmt_dollars_cents(m["total_par"]))
-    pdf.label_value("Aggregate Principal Balance:", fmt_dollars_cents(m["total_par"] - 624_568))  # slight difference is normal
+    pdf.label_value("Aggregate Principal Balance:", fmt_dollars_cents(m["total_par"] - 824_568))
     pdf.label_value("Number of Assets:", str(m["n_assets"]))
     pdf.label_value("Number of Obligors:", str(m["n_obligors"]))
     pdf.label_value("Weighted Average Spread (bps):", f"{m['wa_spread_pct'] * 100:.0f}")
@@ -338,16 +276,16 @@ def generate():
         ], widths, aligns)
 
     # ── OC Tests ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("II. PAR VALUE / OVERCOLLATERALIZATION TESTS")
 
     total_par = m["total_par"]
     # Cumulative tranche amounts for OC denominators
-    cum_a = 148_000_000 + 20_000_000  # A-1 + A-2
-    cum_b = cum_a + 24_000_000
-    cum_c = cum_b + 16_500_000
-    cum_d = cum_c + 14_000_000
-    cum_e = cum_d + 10_000_000
+    cum_a = 240_000_000 + 20_000_000  # A-1 + A-2
+    cum_b = cum_a + 32_000_000
+    cum_c = cum_b + 24_000_000
+    cum_d = cum_c + 20_000_000
+    cum_e = cum_d + 14_000_000
 
     pdf.sub_title("Overcollateralization Tests")
     cols = ["Test Name", "Class", "Numerator", "Denominator", "Actual", "Trigger", "Cushion", "Result"]
@@ -381,7 +319,7 @@ def generate():
     pdf.table_row(["Defaulted Securities", "Exclusion", "Recovery value only", "$0", "$0", "$0"], widths, aligns)
 
     # ── IC Tests ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("III. INTEREST COVERAGE TESTS")
 
     # Compute interest income from holdings (quarterly)
@@ -432,47 +370,50 @@ def generate():
         pdf.table_row([t["class"], fmt_dollars(round(interest)), "USD"], widths, aligns)
 
     # ── Account Balances ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("IV. ACCOUNT BALANCES")
     cols = ["Account Name", "Type", "Currency", "Balance", "Required", "Excess/(Deficit)"]
     widths = [40, 25, 20, 30, 30, 35]
     aligns = ["L", "L", "C", "R", "R", "R"]
     pdf.table_header(cols, widths)
     accounts = [
-        ["Payment Account", "Operating", "USD", "$3,245,872.50", "N/A", "N/A"],
-        ["Collection Account", "Operating", "USD", "$8,127,341.25", "N/A", "N/A"],
-        ["Interest Reserve", "Reserve", "USD", "$1,250,000.00", "$1,250,000.00", "$0.00"],
-        ["Principal Collection", "Operating", "USD", "$4,532,118.75", "N/A", "N/A"],
-        ["Expense Reserve", "Reserve", "USD", "$175,000.00", "$150,000.00", "$25,000.00"],
-        ["Revolver Funding", "Commitment", "USD", "$2,500,000.00", "N/A", "N/A"],
+        ["Payment Account", "Operating", "USD", "$5,245,872.50", "N/A", "N/A"],
+        ["Collection Account", "Operating", "USD", "$12,427,341.25", "N/A", "N/A"],
+        ["Interest Reserve", "Reserve", "USD", "$2,150,000.00", "$2,150,000.00", "$0.00"],
+        ["Principal Collection", "Operating", "USD", "$7,532,118.75", "N/A", "N/A"],
+        ["Expense Reserve", "Reserve", "USD", "$275,000.00", "$250,000.00", "$25,000.00"],
+        ["Revolver Funding", "Commitment", "USD", "$3,500,000.00", "N/A", "N/A"],
     ]
     for row in accounts:
         pdf.table_row(row, widths, aligns)
 
-    # ── Holdings ──
-    pdf.add_page()
+    # ── Holdings — LANDSCAPE ──
+    pdf.add_page("L")
     pdf.section_title("V. SCHEDULE OF INVESTMENTS")
 
-    cols_h = ["Obligor", "ISIN", "Maturity", "Par Balance", "Price", "Spread (bps)", "Fixed", "Moody's", "S&P"]
-    widths_h = [30, 24, 20, 24, 14, 16, 12, 14, 14]
-    aligns_h = ["L", "L", "C", "R", "R", "C", "C", "C", "C"]
+    cols_h = ["Obligor", "Facility", "ISIN", "Type", "Ccy", "Maturity", "Par Balance", "Price",
+              "Spread", "Fixed", "Moody's", "S&P", "Industry", "Recovery"]
+    widths_h = [28, 18, 22, 16, 10, 16, 22, 12, 12, 10, 12, 10, 28, 14]
+    aligns_h = ["L", "L", "L", "L", "C", "C", "R", "R", "C", "C", "C", "C", "L", "R"]
 
     pdf.sub_title("Portfolio Holdings")
     pdf.table_header(cols_h, widths_h)
 
     for h in HOLDINGS:
-        if pdf.get_y() > 260:
-            pdf.add_page()
+        if pdf.get_y() > 175:
+            pdf.add_page("L")
             pdf.table_header(cols_h, widths_h)
         spread_str = str(h["spread_bps"]) if h["spread_bps"] else "N/A"
         pdf.table_row([
-            h["obligor"][:18], h["isin"], h["maturity"],
+            h["obligor"][:20], h["facility"][:14], h["isin"], h["type"][:12],
+            h["currency"], h["maturity"],
             fmt_dollars(h["par"]), f"{h['price']:.2f}", spread_str,
-            "Yes" if h["fixed"] else "No", h["moodys"], h["sp"]
+            "Y" if h["fixed"] else "N", h["moodys"], h["sp"],
+            h["moodys_ind"][:20], f"{h['recovery']:.1f}%"
         ], widths_h, aligns_h)
 
     # ── Tranche Payment Summary ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("V-B. TRANCHE PAYMENT SUMMARY")
 
     pdf.sub_title("Note Balances and Payments - Current Period")
@@ -488,7 +429,7 @@ def generate():
             interest = t["original"] * rate / 4
         else:
             interest = 0
-        principal_paid = 0  # No amortization in first period
+        principal_paid = 0
         ending = beginning - principal_paid
         pdf.table_row([
             t["class"], fmt_dollars(beginning), fmt_dollars(round(interest)),
@@ -496,19 +437,22 @@ def generate():
         ], widths_tp, aligns_tp)
 
     # ── Concentrations ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("VI. CONCENTRATION / PORTFOLIO PROFILE")
 
     pdf.sub_title("Industry Concentration")
     cols_c = ["Industry", "Actual ($)", "Actual %", "Limit %", "Excess", "Pass/Fail"]
-    widths_c = [40, 30, 22, 22, 30, 22]
+    widths_c = [45, 28, 20, 20, 28, 20]
     aligns_c = ["L", "R", "R", "R", "R", "C"]
     pdf.table_header(cols_c, widths_c)
 
     for ind, par in sorted(m["industry_par"].items(), key=lambda x: -x[1]):
+        if pdf.get_y() > 260:
+            pdf.add_page("P")
+            pdf.table_header(cols_c, widths_c)
         pct = par / total_par * 100
         limit = 12.0 if pct > 2.5 else 10.0
-        pdf.table_row([ind[:22], fmt_dollars(par), f"{pct:.2f}%", f"{limit:.2f}%", "$0", "Pass"], widths_c, aligns_c)
+        pdf.table_row([ind[:28], fmt_dollars(par), f"{pct:.2f}%", f"{limit:.2f}%", "$0", "Pass"], widths_c, aligns_c)
 
     pdf.ln(6)
     pdf.sub_title("Rating Distribution")
@@ -529,21 +473,21 @@ def generate():
     widths_o = [50, 30, 22, 22, 22]
     aligns_o = ["L", "R", "R", "R", "C"]
     pdf.table_header(cols_o, widths_o)
-    for h in m["sorted_holdings"][:5]:
+    for h in m["sorted_holdings"][:10]:
         pct = h["par"] / total_par * 100
-        pdf.table_row([h["obligor"], fmt_dollars(h["par"]), f"{pct:.2f}%", "2.50%",
+        pdf.table_row([h["obligor"][:30], fmt_dollars(h["par"]), f"{pct:.2f}%", "2.50%",
                         "Pass" if pct < 2.5 else "Fail"], widths_o, aligns_o)
 
     # ── Trading Activity ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("VII. TRADING ACTIVITY")
     pdf.sub_title("Trading Summary")
-    pdf.label_value("Total Purchases (Par):", "$12,450,000")
-    pdf.label_value("Total Sales (Par):", "$8,200,000")
-    pdf.label_value("Net Gain/(Loss):", "($164,000)")
-    pdf.label_value("Total Paydowns:", "$3,750,000")
-    pdf.label_value("Total Prepayments:", "$1,250,000")
-    pdf.label_value("Turnover Rate:", "5.23%")
+    pdf.label_value("Total Purchases (Par):", "$18,750,000")
+    pdf.label_value("Total Sales (Par):", "$12,200,000")
+    pdf.label_value("Net Gain/(Loss):", "($264,000)")
+    pdf.label_value("Total Paydowns:", "$5,750,000")
+    pdf.label_value("Total Prepayments:", "$2,450,000")
+    pdf.label_value("Turnover Rate:", "4.83%")
     pdf.ln(4)
 
     pdf.sub_title("Trade Detail")
@@ -551,20 +495,22 @@ def generate():
     widths_t = [20, 34, 22, 22, 26, 16, 26]
     aligns_t = ["L", "L", "C", "C", "R", "R", "R"]
     pdf.table_header(cols_t, widths_t)
+    # Use a few real names from the portfolio
+    top5 = [h["obligor"][:20] for h in m["sorted_holdings"][:7]]
     trades = [
-        ["Purchase", "Alpha Energy Co",  "11/20/2024", "11/25/2024", "$2,500,000", "99.50", "$2,487,500"],
-        ["Purchase", "Bravo Logistics",   "11/22/2024", "11/27/2024", "$3,000,000", "98.75", "$2,962,500"],
-        ["Purchase", "Charlie Retail",    "12/01/2024", "12/05/2024", "$1,950,000", "99.00", "$1,930,500"],
-        ["Sale",     "Foxtrot Media",     "11/18/2024", "11/22/2024", "$3,200,000", "97.00", "$3,104,000"],
-        ["Sale",     "Golf Industries",   "12/02/2024", "12/06/2024", "$2,500,000", "98.50", "$2,462,500"],
-        ["Paydown",  "India Software",    "12/15/2024", "12/15/2024", "$2,000,000", "100.00","$2,000,000"],
-        ["Paydown",  "Juliet Consumer",   "12/15/2024", "12/15/2024", "$1,750,000", "100.00","$1,750,000"],
+        ["Purchase", top5[0], "11/20/2024", "11/25/2024", "$3,500,000", "99.50", "$3,482,500"],
+        ["Purchase", top5[1], "11/22/2024", "11/27/2024", "$4,000,000", "98.75", "$3,950,000"],
+        ["Purchase", top5[2], "12/01/2024", "12/05/2024", "$2,250,000", "99.00", "$2,227,500"],
+        ["Sale",     top5[3], "11/18/2024", "11/22/2024", "$4,200,000", "97.25", "$4,084,500"],
+        ["Sale",     top5[4], "12/02/2024", "12/06/2024", "$3,500,000", "98.50", "$3,447,500"],
+        ["Paydown",  top5[5], "12/15/2024", "12/15/2024", "$3,000,000", "100.00","$3,000,000"],
+        ["Paydown",  top5[6], "12/15/2024", "12/15/2024", "$2,750,000", "100.00","$2,750,000"],
     ]
     for row in trades:
         pdf.table_row(row, widths_t, aligns_t)
 
     # ── Supplementary ──
-    pdf.add_page()
+    pdf.add_page("P")
     pdf.section_title("VIII. SUPPLEMENTARY INFORMATION")
     pdf.sub_title("Events")
     pdf.set_font("Helvetica", "", 9)
@@ -594,7 +540,8 @@ def generate():
     pdf.label_value("WA Life:", f"{m['wal']:.2f} years")
 
     # Save
-    path = "/Users/solal/Documents/GitHub/funzies/samples/sample_compliance_report.pdf"
+    import os
+    path = os.path.join(os.path.dirname(__file__), "sample_compliance_report.pdf")
     pdf.output(path)
     print(f"Generated: {path} ({pdf.page_no()} pages)")
     print(f"  Total Par: {fmt_dollars(m['total_par'])}")

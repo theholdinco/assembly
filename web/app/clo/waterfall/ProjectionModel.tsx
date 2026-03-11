@@ -129,30 +129,46 @@ export default function ProjectionModel({
     return name.includes("interest coverage") || (name.includes("ic") && name.includes("ratio"));
   };
 
-  const ocTriggersFromTests = complianceTests
-    .filter((t) => isOcTest(t) && t.triggerLevel !== null && t.testClass)
-    .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
+  // Deduplicate triggers by className — keep highest triggerLevel (most conservative)
+  function dedupTriggers(triggers: { className: string; triggerLevel: number }[]) {
+    const byClass = new Map<string, { className: string; triggerLevel: number }>();
+    for (const t of triggers) {
+      const existing = byClass.get(t.className);
+      if (!existing || t.triggerLevel > existing.triggerLevel) {
+        byClass.set(t.className, t);
+      }
+    }
+    return Array.from(byClass.values());
+  }
 
-  const icTriggersFromTests = complianceTests
-    .filter((t) => isIcTest(t) && t.triggerLevel !== null && t.testClass)
-    .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
+  const ocTriggersRaw = useMemo(() => {
+    const fromTests = complianceTests
+      .filter((t) => isOcTest(t) && t.triggerLevel !== null && t.testClass)
+      .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
+    const raw = fromTests.length > 0
+      ? fromTests
+      : (constraints.coverageTestEntries ?? [])
+          .filter((e) => e.class && e.parValueRatio && parseFloat(e.parValueRatio))
+          .map((e) => ({ className: e.class!, triggerLevel: parseFloat(e.parValueRatio!) }));
+    return dedupTriggers(raw);
+  }, [complianceTests, constraints]);
 
-  // Fall back to extractedConstraints coverage tests if no compliance test records
-  const ocTriggers = ocTriggersFromTests.length > 0
-    ? ocTriggersFromTests
-    : (constraints.coverageTestEntries ?? [])
-        .filter((e) => e.parValueRatio && parseFloat(e.parValueRatio))
-        .map((e) => ({ className: e.class, triggerLevel: parseFloat(e.parValueRatio!) }));
+  const icTriggersRaw = useMemo(() => {
+    const fromTests = complianceTests
+      .filter((t) => isIcTest(t) && t.triggerLevel !== null && t.testClass)
+      .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
+    const raw = fromTests.length > 0
+      ? fromTests
+      : (constraints.coverageTestEntries ?? [])
+          .filter((e) => e.class && e.interestCoverageRatio && parseFloat(e.interestCoverageRatio))
+          .map((e) => ({ className: e.class!, triggerLevel: parseFloat(e.interestCoverageRatio!) }));
+    return dedupTriggers(raw);
+  }, [complianceTests, constraints]);
 
-  const icTriggers = icTriggersFromTests.length > 0
-    ? icTriggersFromTests
-    : (constraints.coverageTestEntries ?? [])
-        .filter((e) => e.interestCoverageRatio && parseFloat(e.interestCoverageRatio))
-        .map((e) => ({ className: e.class, triggerLevel: parseFloat(e.interestCoverageRatio!) }));
-
-  const snapshotByTrancheId = new Map(trancheSnapshots.map((s) => [s.trancheId, s]));
-  const trancheInputs = tranches.length > 0
-    ? tranches
+  const trancheInputs = useMemo(() => {
+    if (tranches.length > 0) {
+      const snapshotByTrancheId = new Map(trancheSnapshots.map((s) => [s.trancheId, s]));
+      return [...tranches]
         .sort((a, b) => (a.seniorityRank ?? 99) - (b.seniorityRank ?? 99))
         .map((t) => {
           const snap = snapshotByTrancheId.get(t.id);
@@ -164,8 +180,52 @@ export default function ProjectionModel({
             isFloating: t.isFloating ?? true,
             isIncomeNote: t.isIncomeNote ?? t.isSubordinate ?? false,
           };
-        })
-    : buildTranchesFromConstraints(constraints);
+        });
+    }
+    return buildTranchesFromConstraints(constraints);
+  }, [tranches, trancheSnapshots, constraints]);
+
+  // Resolve a single class letter (e.g. "B", "D-RR") to a tranche seniority rank
+  function resolveOneClass(cls: string): number {
+    // Strip "-RR" suffix for matching (e.g. "D-RR" → match "Class D" or "D")
+    const base = cls.replace(/-RR$/i, "");
+    // 1. Exact match
+    const exact = trancheInputs.find((t) => t.className === cls || t.className === base);
+    if (exact) return exact.seniorityRank;
+    // 2. Prefix match: "B" matches "Class B", "Class B-1", "B-2", etc.
+    const prefixMatches = trancheInputs.filter(
+      (t) =>
+        t.className.startsWith(`Class ${base}`) ||
+        t.className.startsWith(`${base}-`) ||
+        t.className.toUpperCase() === `CLASS ${base.toUpperCase()}`
+    );
+    if (prefixMatches.length > 0) {
+      // Use most senior rank (lowest number) — debt sum naturally includes all via rank filter
+      return Math.min(...prefixMatches.map((t) => t.seniorityRank));
+    }
+    return 0; // unmapped
+  }
+
+  // Resolve trigger class names → tranche seniority ranks
+  // Handles compound classes like "A/B" (split on /, use most junior = highest rank)
+  function resolveRank(triggerClass: string): number {
+    const parts = triggerClass.split("/");
+    const ranks = parts.map(resolveOneClass).filter((r) => r > 0);
+    if (ranks.length === 0) return 0; // unmapped
+    // For compound "A/B", the OC test protects at-and-above the most junior class
+    return Math.max(...ranks);
+  }
+
+  const ocTriggers = useMemo(
+    () => ocTriggersRaw.map((oc) => ({ ...oc, rank: resolveRank(oc.className) })),
+    [ocTriggersRaw, trancheInputs]
+  );
+  const icTriggers = useMemo(
+    () => icTriggersRaw.map((ic) => ({ ...ic, rank: resolveRank(ic.className) })),
+    [icTriggersRaw, trancheInputs]
+  );
+  const unmappedOc = ocTriggers.filter((oc) => oc.rank === 0);
+  const unmappedIc = icTriggers.filter((ic) => ic.rank === 0);
 
   const [cdrPct, setCdrPct] = useState(2);
   const [cprPct, setCprPct] = useState(15);
@@ -322,6 +382,29 @@ export default function ProjectionModel({
           dealContext={dealContext}
           onApply={handleApplyAssumptions}
         />
+      )}
+
+      {/* Unmapped OC/IC trigger warnings */}
+      {(unmappedOc.length > 0 || unmappedIc.length > 0) && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            border: "1px solid #d4a017",
+            borderRadius: "var(--radius-sm)",
+            background: "#fef9e7",
+            marginBottom: "1rem",
+            fontSize: "0.78rem",
+            color: "#7d6608",
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>OC/IC Trigger Mapping Warnings</div>
+          {unmappedOc.map((oc) => (
+            <div key={oc.className}>&bull; OC trigger &quot;{oc.className}&quot; — no matching tranche, test disabled</div>
+          ))}
+          {unmappedIc.map((ic) => (
+            <div key={ic.className}>&bull; IC trigger &quot;{ic.className}&quot; — no matching tranche, test disabled</div>
+          ))}
+        </div>
       )}
 
       {/* Results */}
@@ -580,6 +663,8 @@ export default function ProjectionModel({
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Recoveries</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Reinvest</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>End Par</th>
+                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Beg Liab</th>
+                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>End Liab</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Interest</th>
                       <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Equity</th>
                     </tr>
@@ -597,6 +682,8 @@ export default function ProjectionModel({
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.recoveries)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.reinvestment)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingPar)}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningLiabilities)}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingLiabilities)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.interestCollected)}</td>
                         <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.equityDistribution > 0 ? "var(--color-high)" : undefined, fontWeight: p.equityDistribution > 0 ? 600 : undefined }}>
                           {formatAmount(p.equityDistribution)}

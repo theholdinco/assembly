@@ -40,12 +40,20 @@ CLO structural knowledge (DO NOT flag these as issues):
 - Subordinated Notes / Income Notes do NOT bear a fixed coupon or spread. They receive the RESIDUAL interest after all rated tranche coupons, fees, and coverage test diversions are paid. Seeing zero or null "interest paid" on sub notes is NORMAL — their distributions appear as residual equity distributions, not as interest. Do NOT flag this as an anomaly.
 - Sub notes also have no spread (spreadBps=NULL is correct) and no reference rate. This is by design.
 - Total tranche principal (original face value of all notes) will NOT match the current pool collateral balance. The pool balance changes constantly as loans repay, prepay, default, or are traded, while tranche balances only change through scheduled/unscheduled note payments. A mismatch between these two figures is completely normal — do NOT flag it as an error or warning.
+- OC/IC actual ratios WILL differ from their trigger levels — that is expected. A passing test means actual > trigger. Do NOT flag a "mismatch" when the PPM trigger and the compliance report trigger agree but the actual ratio differs from the trigger. Only flag a true mismatch if the PPM-specified trigger LEVEL disagrees with the compliance report's trigger LEVEL for the same test class.
+- Tranche currentBalance being lower than originalBalance is NORMAL — tranches amortize over time through principal payments. Only flag if currentBalance is HIGHER than originalBalance (indicates a data error or reset).
+- WAC spread may appear as a small number (e.g. 3.85) when stored in percentage form rather than basis points. The model auto-converts values < 20 to bps (× 100). Do NOT flag a WAC spread between 1–20 as "abnormally low" — it is likely in percentage form (e.g. 3.85% = 385 bps).
+- Test class name formatting varies between PPM and compliance reports (e.g. "Class E" vs "E", "Class A/B" vs "A/B"). The system normalizes these automatically. Do NOT flag minor naming differences as mismatches — only flag if a test class in the PPM has NO plausible match in the compliance data at all.
+- Some tranches may be fixed-rate in a predominantly floating-rate deal. This is normal (hedged or structured as fixed). Do NOT flag fixed-rate tranches as unusual unless ALL rated tranches are unexpectedly fixed.
 
-Check for:
-1. Missing required fields needed for the waterfall model (maturity date, tranche balances, spreads, OC/IC trigger levels)
-2. Cross-reference values for consistency (test levels matching PPM data, tranche names matching between PPM and report)
-3. Anything that looks unusual for a CLO deal (e.g., abnormally low/high WAC spread, missing rated tranches, zero balances on RATED tranches)
-4. Missing waterfall steps or compliance test data
+Check for these specific issues that affect the waterfall projection model:
+1. Missing REQUIRED fields (severity=error): maturity date, tranche spreads on rated non-income notes, at least one OC or IC trigger level
+2. Seniority rank problems: duplicate ranks across different tranches, gaps in rank sequence, or missing ranks — these cause the waterfall to pay tranches in wrong order
+3. OC/IC trigger class names that do not match ANY tranche class name (even after removing "Class" prefix and whitespace) — unmatched triggers are silently disabled in the projection
+4. Tranches missing snapshots: if a tranche is defined but has no corresponding snapshot, the model falls back to originalBalance which may be stale
+5. Zero spread (spreadBps=0 or NULL) on a rated floating-rate tranche (not an income note) — the model cannot calculate interest due
+6. Cross-reference PPM coverage test trigger LEVELS against compliance test trigger LEVELS for the same class — only flag if the numeric values disagree
+7. Missing compliance test data entirely (no OC or IC tests at all)
 
 Output a JSON array of warnings. Each warning must have:
 - "severity": "error" (blocking — model can't run), "warning" (model runs but may be wrong), or "info" (FYI)
@@ -145,14 +153,24 @@ function summarizeDealContext(ctx: Record<string, any>): string {
 
   // Tranche snapshots
   const snaps = ctx.trancheSnapshots as any[] | undefined;
+  const tranchesWithSnapshots = new Set<string>();
   if (snaps && snaps.length > 0) {
     parts.push(`\nTranche Snapshots (${snaps.length}):`);
     for (const s of snaps) {
       const trancheName = trancheById.get(s.trancheId)?.className ?? s.trancheId ?? "?";
+      tranchesWithSnapshots.add(trancheName);
       parts.push(`  ${trancheName}: curBal=${s.currentBalance ?? "NULL"}, beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}`);
     }
   } else {
     parts.push("\nTranche Snapshots: NONE");
+  }
+
+  // Flag tranches missing snapshots
+  if (tranches && tranches.length > 0) {
+    const missing = tranches.filter((t: any) => !tranchesWithSnapshots.has(t.className));
+    if (missing.length > 0) {
+      parts.push(`\nTranches WITHOUT snapshots: ${missing.map((t: any) => t.className).join(", ")}`);
+    }
   }
 
   // Compliance tests — compact
@@ -177,15 +195,24 @@ function summarizeDealContext(ctx: Record<string, any>): string {
     parts.push("\nAccount Balances: NONE");
   }
 
-  // Key constraints from PPM (compact)
+  // Key constraints from PPM
   const c = ctx.constraints;
   if (c) {
     if (c.keyDates) parts.push(`\nPPM Key Dates: ${JSON.stringify(c.keyDates)}`);
-    if (c.capitalStructure) {
-      parts.push(`PPM Capital Structure (${Array.isArray(c.capitalStructure) ? c.capitalStructure.length : 0} tranches)`);
+    if (c.capitalStructure && Array.isArray(c.capitalStructure)) {
+      parts.push(`\nPPM Capital Structure (${c.capitalStructure.length} tranches):`);
+      for (const t of c.capitalStructure) {
+        parts.push(`  ${t.class ?? "?"}: principal=${t.principalAmount ?? "NULL"}, spread=${t.spread ?? t.spreadBps ?? "NULL"}, rate=${t.rateType ?? "?"}, maturity=${t.maturityDate ?? "NULL"}`);
+      }
     }
     if (c.coverageTestEntries) {
-      parts.push(`PPM Coverage Tests: ${JSON.stringify(c.coverageTestEntries).slice(0, 500)}`);
+      parts.push(`\nPPM Coverage Tests:`);
+      for (const entry of Array.isArray(c.coverageTestEntries) ? c.coverageTestEntries : []) {
+        const triggers = [];
+        if (entry.parValueRatio) triggers.push(`OC_PAR=${entry.parValueRatio}`);
+        if (entry.interestCoverageRatio) triggers.push(`IC=${entry.interestCoverageRatio}`);
+        if (triggers.length) parts.push(`  ${entry.class ?? "?"}: ${triggers.join(", ")}`);
+      }
     }
   }
 

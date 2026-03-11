@@ -14,8 +14,8 @@ export interface ProjectionInputs {
     isFloating: boolean;
     isIncomeNote: boolean;
   }[];
-  ocTriggers: { className: string; triggerLevel: number }[];
-  icTriggers: { className: string; triggerLevel: number }[];
+  ocTriggers: { className: string; triggerLevel: number; rank: number }[];
+  icTriggers: { className: string; triggerLevel: number; rank: number }[];
   reinvestmentPeriodEnd: string | null;
   maturityDate: string | null;
   currentDate: string;
@@ -38,6 +38,8 @@ export interface PeriodResult {
   reinvestment: number;
   endingPar: number;
   interestCollected: number;
+  beginningLiabilities: number;
+  endingLiabilities: number;
   trancheInterest: { className: string; due: number; paid: number }[];
   tranchePrincipal: { className: string; paid: number; endBalance: number }[];
   ocTests: { className: string; actual: number; trigger: number; passing: boolean }[];
@@ -76,7 +78,7 @@ function quartersBetween(startIso: string, endIso: string): number {
   const start = new Date(startIso);
   const end = new Date(endIso);
   const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  return Math.max(1, Math.ceil(months / 3));
+  return Math.ceil(months / 3);
 }
 
 function addQuarters(dateIso: string, quarters: number): string {
@@ -102,12 +104,14 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     maturitySchedule,
   } = inputs;
 
-  const totalQuarters = maturityDate ? quartersBetween(currentDate, maturityDate) : 40;
+  const totalQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : 40;
   const recoveryLagQ = Math.max(0, Math.round(recoveryLagMonths / 3));
 
-  // Annual rates → quarterly via deannualization
-  const qDefaultRate = 1 - Math.pow(1 - cdrPct / 100, 0.25);
-  const qPrepayRate = 1 - Math.pow(1 - cprPct / 100, 0.25);
+  // Annual rates → quarterly via deannualization (clamp to [0, 99.99] to avoid NaN)
+  const clampedCdr = Math.max(0, Math.min(cdrPct, 99.99));
+  const clampedCpr = Math.max(0, Math.min(cprPct, 99.99));
+  const qDefaultRate = 1 - Math.pow(1 - clampedCdr / 100, 0.25);
+  const qPrepayRate = 1 - Math.pow(1 - clampedCpr / 100, 0.25);
 
   // Track tranche balances (debt outstanding per tranche)
   const trancheBalances: Record<string, number> = {};
@@ -118,16 +122,9 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     trancheBalances[t.className] = t.currentBalance;
   }
 
-  // Pre-index OC/IC triggers by class seniority rank for O(1) lookup
-  const trancheRankMap = new Map(sortedTranches.map((t) => [t.className, t.seniorityRank]));
-  const ocTriggersByClass = ocTriggers.map((oc) => ({
-    ...oc,
-    rank: trancheRankMap.get(oc.className) ?? 0,
-  }));
-  const icTriggersByClass = icTriggers.map((ic) => ({
-    ...ic,
-    rank: trancheRankMap.get(ic.className) ?? 0,
-  }));
+  // OC/IC triggers already have rank resolved by the caller (ProjectionModel)
+  const ocTriggersByClass = ocTriggers;
+  const icTriggersByClass = icTriggers;
 
   // Recovery pipeline: future cash from defaulted assets
   const recoveryPipeline: { quarter: number; amount: number }[] = [];
@@ -164,6 +161,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     const periodDate = addQuarters(currentDate, q);
     const inRP = rpEndDate ? new Date(periodDate) <= rpEndDate : false;
     const beginningPar = currentPar;
+    const beginningLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
 
     // ── 1. Defaults ──────────────────────────────────────────────
     // Remove defaulted par from performing pool
@@ -197,7 +195,13 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       : recoveryPipeline.filter((r) => r.quarter === q).reduce((s, r) => s + r.amount, 0);
     // NOTE: recoveries do NOT add to currentPar — par was permanently reduced by the default.
 
-    // ── 4. Reinvestment ─────────────────────────────────────────
+    // ── 4. Interest collection ─────────────────────────────────
+    // Interest accrues on beginning-of-period par at the pre-reinvestment WAC.
+    // This must happen BEFORE reinvestment blends the WAC for next period.
+    const allInRate = (baseRatePct + currentWacSpreadBps / 100) / 100;
+    const interestCollected = beginningPar * allInRate / 4;
+
+    // ── 5. Reinvestment ─────────────────────────────────────────
     // During the RP, reinvest prepayment + recovery cash into new assets
     let reinvestment = 0;
     if (inRP) {
@@ -211,17 +215,14 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       }
     }
 
-    const endingPar = currentPar;
-
-    // ── 5. Interest collection ──────────────────────────────────
-    // Interest accrues on performing par (after defaults, before it was reduced by prepays
-    // that happen mid-period). Using beginningPar is the standard simplification.
-    const allInRate = (baseRatePct + currentWacSpreadBps / 100) / 100;
-    const interestCollected = beginningPar * allInRate / 4;
+    let endingPar = currentPar;
 
     // ── 6. Compute OC & IC ratios ───────────────────────────────
     // OC = performing par / debt outstanding (at or above the tested class)
-    // IC = interest collected / interest due on debt at-and-above the tested class
+    // IC = interest available (after senior fees) / interest due on debt at-and-above
+    const seniorFeeAmount = beginningPar * (seniorFeePct / 100) / 4;
+    const interestAfterFees = Math.max(0, interestCollected - seniorFeeAmount);
+
     const ocResults: PeriodResult["ocTests"] = [];
     const icResults: PeriodResult["icTests"] = [];
 
@@ -238,14 +239,22 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       const interestDueAtAndAbove = debtTranches
         .filter((t) => t.seniorityRank <= ic.rank)
         .reduce((s, t) => s + trancheBalances[t.className] * trancheCouponRate(t, baseRatePct) / 4, 0);
-      const actual = interestDueAtAndAbove > 0 ? (interestCollected / interestDueAtAndAbove) * 100 : 999;
+      const actual = interestDueAtAndAbove > 0 ? (interestAfterFees / interestDueAtAndAbove) * 100 : 999;
       const passing = actual >= ic.triggerLevel;
       icResults.push({ className: ic.className, actual, trigger: ic.triggerLevel, passing });
     }
 
-    // Build a set of failing test class names for waterfall gating
-    const failingOcClasses = new Set(ocResults.filter((r) => !r.passing).map((r) => r.className));
-    const failingIcClasses = new Set(icResults.filter((r) => !r.passing).map((r) => r.className));
+    // Build a set of failing test seniority ranks for waterfall gating
+    const failingOcRanks = new Set(
+      ocTriggersByClass
+        .filter((oc) => ocResults.some((r) => r.className === oc.className && !r.passing))
+        .map((oc) => oc.rank)
+    );
+    const failingIcRanks = new Set(
+      icTriggersByClass
+        .filter((ic) => icResults.some((r) => r.className === ic.className && !r.passing))
+        .map((ic) => ic.rank)
+    );
 
     // ── 7. Interest waterfall (OC/IC-gated) ─────────────────────
     // In a real CLO: pay senior interest → check OC/IC at that level → if fail,
@@ -255,7 +264,6 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     let diversionToPaydown = 0;
 
     // Senior fees first (trustee, admin, collateral manager senior fee)
-    const seniorFeeAmount = beginningPar * (seniorFeePct / 100) / 4;
     availableInterest -= Math.min(seniorFeeAmount, availableInterest);
 
     // Walk through debt tranches by seniority. After paying each tranche's interest,
@@ -276,8 +284,8 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       availableInterest -= paid;
       trancheInterest.push({ className: t.className, due, paid });
 
-      // Check if any OC/IC test at this tranche's level is failing
-      if (failingOcClasses.has(t.className) || failingIcClasses.has(t.className)) {
+      // Check if any OC/IC test at this tranche's seniority rank is failing
+      if (failingOcRanks.has(t.seniorityRank) || failingIcRanks.has(t.seniorityRank)) {
         diversionToPaydown += availableInterest;
         availableInterest = 0;
         diverted = true;
@@ -296,7 +304,10 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     let availablePrincipal = prepayments + scheduledMaturities + recoveries - reinvestment + diversionToPaydown + liquidationProceeds;
     if (availablePrincipal < 0) availablePrincipal = 0;
     // If liquidating, the par is consumed
-    if (isMaturity) currentPar = 0;
+    if (isMaturity) {
+      currentPar = 0;
+      endingPar = 0;
+    }
 
     const tranchePrincipal: PeriodResult["tranchePrincipal"] = [];
     for (const t of sortedTranches) {
@@ -314,6 +325,8 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       }
     }
 
+    const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
+
     // Remaining principal cash + interest residual → equity
     const equityDistribution = equityFromInterest + availablePrincipal;
     totalEquityDistributions += equityDistribution;
@@ -329,6 +342,8 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       recoveries,
       reinvestment,
       endingPar,
+      beginningLiabilities,
+      endingLiabilities,
       interestCollected,
       trancheInterest,
       tranchePrincipal,

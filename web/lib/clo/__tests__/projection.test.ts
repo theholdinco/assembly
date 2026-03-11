@@ -18,12 +18,12 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
       { className: "Sub", currentBalance: 20_000_000, spreadBps: 0, seniorityRank: 3, isFloating: false, isIncomeNote: true },
     ],
     ocTriggers: [
-      { className: "A", triggerLevel: 120 },
-      { className: "B", triggerLevel: 110 },
+      { className: "A", triggerLevel: 120, rank: 1 },
+      { className: "B", triggerLevel: 110, rank: 2 },
     ],
     icTriggers: [
-      { className: "A", triggerLevel: 120 },
-      { className: "B", triggerLevel: 110 },
+      { className: "A", triggerLevel: 120, rank: 1 },
+      { className: "B", triggerLevel: 110, rank: 2 },
     ],
     reinvestmentPeriodEnd: "2028-06-15",
     maturityDate: "2034-06-15",
@@ -276,6 +276,212 @@ describe("runProjection — loan maturities", () => {
     );
     const q3 = result.periods.find((p) => p.periodNum === 3)!;
     expect(q3.scheduledMaturities).toBeCloseTo(8_000_000, -2);
+  });
+});
+
+// ─── runProjection — OC/IC gating ───────────────────────────────────────────
+
+describe("runProjection — OC gating diverts cash from equity", () => {
+  it("high defaults trigger OC failure and cut equity distributions", () => {
+    // With 10% CDR and 0% CPR, par erodes fast. OC tests should fail and divert.
+    const withHighDefaults = runProjection(
+      makeInputs({
+        cdrPct: 10,
+        cprPct: 0,
+        recoveryPct: 0,
+        reinvestmentPeriodEnd: null,
+        ocTriggers: [
+          { className: "A", triggerLevel: 120, rank: 1 },
+          { className: "B", triggerLevel: 110, rank: 2 },
+        ],
+        icTriggers: [],
+      })
+    );
+    const withNoDefaults = runProjection(
+      makeInputs({
+        cdrPct: 0,
+        cprPct: 0,
+        recoveryPct: 0,
+        reinvestmentPeriodEnd: null,
+        ocTriggers: [
+          { className: "A", triggerLevel: 120, rank: 1 },
+          { className: "B", triggerLevel: 110, rank: 2 },
+        ],
+        icTriggers: [],
+      })
+    );
+    // High-default scenario should have much lower equity distributions
+    expect(withHighDefaults.totalEquityDistributions).toBeLessThan(
+      withNoDefaults.totalEquityDistributions
+    );
+    // Eventually some OC test should fail
+    const anyOcFailing = withHighDefaults.periods.some((p) =>
+      p.ocTests.some((oc) => !oc.passing)
+    );
+    expect(anyOcFailing).toBe(true);
+  });
+
+  it("OC failure diverts interest to principal paydown, reducing equity", () => {
+    // Extreme scenario: very tight OC trigger that should fail quickly
+    const result = runProjection(
+      makeInputs({
+        cdrPct: 5,
+        cprPct: 0,
+        recoveryPct: 0,
+        reinvestmentPeriodEnd: null,
+        ocTriggers: [
+          { className: "B", triggerLevel: 200, rank: 2 }, // unreachably high trigger
+        ],
+        icTriggers: [],
+      })
+    );
+    // With a 200% OC trigger on B, it should fail from Q1
+    const q1 = result.periods[0];
+    const ocB = q1.ocTests.find((t) => t.className === "B")!;
+    expect(ocB.passing).toBe(false);
+    // Equity should get zero or near-zero from interest diversion
+    expect(q1.equityDistribution).toBeCloseTo(0, -1);
+  });
+
+  it("beginningLiabilities and endingLiabilities are reported", () => {
+    const result = runProjection(makeInputs());
+    const q1 = result.periods[0];
+    expect(q1.beginningLiabilities).toBeCloseTo(80_000_000, -2); // 65M + 15M
+    expect(q1.endingLiabilities).toBeLessThanOrEqual(q1.beginningLiabilities);
+  });
+});
+
+// ─── Bug regression tests ───────────────────────────────────────────────────
+
+describe("WAC blending timing", () => {
+  it("interest uses pre-reinvestment WAC, not blended WAC", () => {
+    // Two scenarios with different reinvestment spreads — interest in Q1
+    // should be identical because WAC blending only affects NEXT period
+    const withHighSpread = runProjection(
+      makeInputs({ reinvestmentSpreadBps: 500 })
+    );
+    const withLowSpread = runProjection(
+      makeInputs({ reinvestmentSpreadBps: 100 })
+    );
+    // Q1 interest should be identical (same beginningPar, same initial WAC)
+    expect(withHighSpread.periods[0].interestCollected).toBeCloseTo(
+      withLowSpread.periods[0].interestCollected,
+      2
+    );
+    // But Q2 interest should differ (WAC has been blended differently)
+    expect(withHighSpread.periods[1].interestCollected).not.toBeCloseTo(
+      withLowSpread.periods[1].interestCollected,
+      2
+    );
+  });
+});
+
+describe("already-matured loans excluded", () => {
+  it("loans with maturityDate before currentDate are not bucketed", () => {
+    const result = runProjection(
+      makeInputs({
+        cdrPct: 0,
+        cprPct: 0,
+        reinvestmentPeriodEnd: null,
+        maturitySchedule: [{ parBalance: 10_000_000, maturityDate: "2020-01-01" }],
+      })
+    );
+    // No period should have scheduled maturities from a loan that matured in 2020
+    for (const p of result.periods) {
+      expect(p.scheduledMaturities).toBe(0);
+    }
+  });
+});
+
+describe("IC ratio uses post-fee interest", () => {
+  it("IC ratio is lower with higher senior fees", () => {
+    const lowFee = runProjection(
+      makeInputs({
+        seniorFeePct: 0.1,
+        cdrPct: 0,
+        cprPct: 0,
+        icTriggers: [{ className: "A", triggerLevel: 100, rank: 1 }],
+        ocTriggers: [],
+      })
+    );
+    const highFee = runProjection(
+      makeInputs({
+        seniorFeePct: 2.0,
+        cdrPct: 0,
+        cprPct: 0,
+        icTriggers: [{ className: "A", triggerLevel: 100, rank: 1 }],
+        ocTriggers: [],
+      })
+    );
+    const icLow = lowFee.periods[0].icTests[0].actual;
+    const icHigh = highFee.periods[0].icTests[0].actual;
+    expect(icHigh).toBeLessThan(icLow);
+  });
+});
+
+describe("endingPar at maturity", () => {
+  it("endingPar is zero in the final period after liquidation", () => {
+    const result = runProjection(
+      makeInputs({
+        cdrPct: 2,
+        cprPct: 15,
+        maturityDate: "2028-03-09", // 8 quarters
+      })
+    );
+    const lastPeriod = result.periods[result.periods.length - 1];
+    expect(lastPeriod.endingPar).toBe(0);
+  });
+});
+
+describe("CDR/CPR >= 100% guard", () => {
+  it("does not produce NaN with extreme CDR", () => {
+    const result = runProjection(makeInputs({ cdrPct: 100 }));
+    expect(result.periods.length).toBeGreaterThan(0);
+    for (const p of result.periods) {
+      expect(p.beginningPar).not.toBeNaN();
+      expect(p.endingPar).not.toBeNaN();
+      expect(p.defaults).not.toBeNaN();
+      expect(p.interestCollected).not.toBeNaN();
+    }
+  });
+});
+
+describe("OC failure causes junior tranche interest shortfall", () => {
+  it("junior tranche gets paid: 0 when OC diverts", () => {
+    const result = runProjection(
+      makeInputs({
+        cdrPct: 5,
+        cprPct: 0,
+        recoveryPct: 0,
+        reinvestmentPeriodEnd: null,
+        // Trigger on A at 200% — always fails, diverts after A interest
+        ocTriggers: [{ className: "A", triggerLevel: 200, rank: 1 }],
+        icTriggers: [],
+      })
+    );
+    const q1 = result.periods[0];
+    const bInterest = q1.trancheInterest.find((t) => t.className === "B")!;
+    // B should get zero interest because A's OC failure diverts everything
+    expect(bInterest.paid).toBe(0);
+    expect(bInterest.due).toBeGreaterThan(0);
+  });
+});
+
+describe("recovery pipeline at maturity", () => {
+  it("accelerates pending recoveries in the final period", () => {
+    const result = runProjection(
+      makeInputs({
+        cdrPct: 5,
+        cprPct: 0,
+        recoveryPct: 60,
+        recoveryLagMonths: 24, // 8 quarter lag — many will be pending at maturity
+        reinvestmentPeriodEnd: null,
+        maturityDate: "2030-03-09", // 16 quarters
+      })
+    );
+    const lastPeriod = result.periods[result.periods.length - 1];
+    // Final period should have recoveries from accelerated pipeline
+    expect(lastPeriod.recoveries).toBeGreaterThan(0);
   });
 });
 
