@@ -3522,3 +3522,102 @@ details > .details-content {
     max-height: 150px;
   }
 }
+
+/* ─── Sidebar History ─── */
+
+.nav-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.65rem;
+  margin-bottom: 0.35rem;
+}
+
+.nav-history-new {
+  font-size: 0.72rem;
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity var(--transition);
+}
+
+.nav-history-new:hover {
+  opacity: 0.7;
+}
+
+.nav-history-list {
+  overflow-y: auto;
+  max-height: 40vh;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.nav-history-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.nav-history-list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+.nav-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.65rem;
+  margin: 1px 0;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+}
+
+.nav-history-item:hover {
+  background: var(--color-surface-hover);
+}
+
+.nav-history-item.active {
+  background: var(--color-accent-subtle);
+  border-left: 2px solid var(--color-accent);
+  padding-left: calc(0.65rem - 2px);
+}
+
+.nav-history-title {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-history-item.active .nav-history-title {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.nav-history-date {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+.nav-history-empty {
+  display: block;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.nav-history-loading {
+  height: 60px;
+  margin: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-surface) 25%, var(--color-surface-hover) 50%, var(--color-surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
