@@ -770,7 +770,7 @@ export default async function CLODashboard() {
      FROM clo_analyses
      WHERE panel_id = $1
      ORDER BY created_at DESC
-     LIMIT 10`,
+     LIMIT 5`,
     [panel.id]
   );
 
@@ -901,7 +901,12 @@ export default async function CLODashboard() {
       </section>
 
       <section className="ic-section">
-        <h2>Recent Analyses</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+          <h2 style={{ margin: 0 }}>Recent Analyses</h2>
+          <Link href="/clo/analyses" className="ic-section-link" style={{ marginTop: 0 }}>
+            View all &rarr;
+          </Link>
+        </div>
         {analyses.length > 0 ? (
           <div className="ic-eval-list">
             {analyses.map((a) => (
