@@ -82,6 +82,7 @@ async function claimJob(): Promise<{
   github_repo_owner: string | null;
   github_repo_name: string | null;
   github_repo_branch: string | null;
+  saved_character_ids: string[];
 } | null> {
   const result = await pool.query(
     `UPDATE assemblies SET status = 'running', current_phase = 'domain-analysis'
@@ -90,7 +91,7 @@ async function claimJob(): Promise<{
        ORDER BY created_at LIMIT 1
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING id, topic_input, user_id, raw_files, attachments, slug, github_repo_owner, github_repo_name, github_repo_branch`
+     RETURNING id, topic_input, user_id, raw_files, attachments, slug, github_repo_owner, github_repo_name, github_repo_branch, saved_character_ids`
   );
   return result.rows[0] ?? null;
 }
@@ -122,6 +123,7 @@ async function processJob(job: {
   github_repo_owner: string | null;
   github_repo_name: string | null;
   github_repo_branch: string | null;
+  saved_character_ids: string[];
 }) {
   const { apiKey } = await getApiKeyForUser(job.user_id);
   const slug = job.slug || slugify(job.topic_input);
@@ -164,6 +166,35 @@ async function processJob(job: {
     console.log(`[worker] Assembly ${job.id}: ${attachments.length} attachment(s)`);
   }
 
+  let savedCharacters: Array<{
+    name: string; tag: string; biography: string; framework: string;
+    frameworkName: string; blindSpot: string; heroes: string[];
+    rhetoricalTendencies: string; debateStyle: string; avatarUrl?: string;
+  }> | undefined;
+
+  const savedIds: string[] = Array.isArray(job.saved_character_ids) ? job.saved_character_ids : [];
+  if (savedIds.length > 0) {
+    const result = await pool.query(
+      `SELECT name, tag, biography, framework, framework_name, blind_spot,
+              heroes, rhetorical_tendencies, debate_style, avatar_url
+       FROM saved_characters WHERE id = ANY($1)`,
+      [savedIds]
+    );
+    savedCharacters = result.rows.map((r: Record<string, unknown>) => ({
+      name: r.name as string,
+      tag: r.tag as string,
+      biography: r.biography as string,
+      framework: r.framework as string,
+      frameworkName: r.framework_name as string,
+      blindSpot: r.blind_spot as string,
+      heroes: (r.heroes || []) as string[],
+      rhetoricalTendencies: r.rhetorical_tendencies as string,
+      debateStyle: r.debate_style as string,
+      avatarUrl: (r.avatar_url || undefined) as string | undefined,
+    }));
+    console.log(`[worker] Assembly ${job.id}: ${savedCharacters.length} saved character(s)`);
+  }
+
   await runPipeline({
     assemblyId: job.id,
     topic: job.topic_input,
@@ -171,6 +202,7 @@ async function processJob(job: {
     apiKey,
     codeContext,
     attachments,
+    savedCharacters,
     initialRawFiles: job.raw_files || {},
     updatePhase: async (phase: string) => {
       await pool.query(

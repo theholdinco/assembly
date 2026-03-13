@@ -1,0 +1,66 @@
+<h2>Three Approaches: Chat-Driven Deliverable Updates</h2>
+<p class="subtitle">How should the conversation feed into deliverable rewrites?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Conversation-Aware Rewrite</h3>
+      <p>When user clicks "Update Deliverable", send the <strong>full chat history + current deliverable</strong> to a new prompt that rewrites the deliverable incorporating everything discussed. The prompt sees the whole conversation and decides what to change.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Most natural — AI sees the full context</li>
+          <li>Handles complex multi-turn corrections well</li>
+          <li>Single API call to produce updated deliverable</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Larger prompt = higher token cost per update</li>
+          <li>Risk of unintended changes to unrelated sections</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Extract-Then-Apply (Two-Step)</h3>
+      <p>First, extract a structured list of changes from the conversation (like the current insight extraction). Then, apply those changes to the deliverable in a second pass — similar to the existing "Evolve" flow but sourcing from chat instead of insights.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>User could review extracted changes before applying</li>
+          <li>More predictable — explicit list of what will change</li>
+          <li>Reuses existing evolution infrastructure</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Two API calls = slower</li>
+          <li>Extraction step may miss nuance from conversation</li>
+          <li>Extra UI step interrupts the flow</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Streaming Inline Update</h3>
+      <p>When user clicks "Update", stream the updated deliverable directly into the page — replacing the current content in real-time. The deliverable page itself becomes the output surface, not the chat.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Most satisfying UX — user watches the update happen</li>
+          <li>No context switching between chat and deliverable</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>More complex frontend — need to handle streaming into the deliverable view</li>
+          <li>Harder to show "what changed" during streaming</li>
+          <li>If it goes wrong, the page flickers with bad content</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top: 1.5rem; color: var(--color-text-secondary); font-size: 0.9rem;">
+  <strong>Recommendation:</strong> Option A — simplest, most natural, and the "What Changed" section gives transparency without the overhead of a two-step process. Streaming (C) is a nice-to-have that can be added later on top of A.
+</p>

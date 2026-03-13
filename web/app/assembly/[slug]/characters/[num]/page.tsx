@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { marked } from "marked";
@@ -43,6 +44,39 @@ export default function CharacterProfilePage() {
   const nonSocrateChars = topic.characters.filter((c) => !isSocrate(c.name));
   const charIndex = nonSocrateChars.findIndex((c) => c.number === num);
   const character = nonSocrateChars[charIndex];
+
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/saved-characters`)
+      .then((r) => r.json())
+      .then((chars: Array<{ id: string; source_assembly_id: string; name: string }>) => {
+        const match = chars.find(
+          (c) => c.source_assembly_id === assemblyId && c.name === character?.name
+        );
+        if (match) setSavedId(match.id);
+      })
+      .catch(() => {});
+  }, [assemblyId, character?.name]);
+
+  async function toggleSave() {
+    if (!character || saving) return;
+    setSaving(true);
+    if (savedId) {
+      await fetch(`/api/saved-characters/${savedId}`, { method: "DELETE" });
+      setSavedId(null);
+    } else {
+      const res = await fetch("/api/saved-characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assemblyId, characterNumber: character.number }),
+      });
+      const data = await res.json();
+      setSavedId(data.id);
+    }
+    setSaving(false);
+  }
 
   if (!character) return <p>Character not found.</p>;
 
@@ -133,6 +167,26 @@ export default function CharacterProfilePage() {
               </span>
             )}
           </div>
+          <button
+            onClick={toggleSave}
+            disabled={saving}
+            title={savedId ? "Remove from saved characters" : "Save character for reuse"}
+            style={{
+              background: "none",
+              border: "1px solid var(--color-border)",
+              borderRadius: "6px",
+              padding: "0.35rem 0.65rem",
+              cursor: "pointer",
+              fontSize: "0.82rem",
+              color: savedId ? "var(--color-accent)" : "var(--color-text-secondary)",
+              marginTop: "0.5rem",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.35rem",
+            }}
+          >
+            {savedId ? "\u2605" : "\u2606"} {savedId ? "Saved" : "Save"}
+          </button>
         </div>
       </div>
 

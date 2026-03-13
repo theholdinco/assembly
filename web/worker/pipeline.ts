@@ -34,6 +34,11 @@ export interface PipelineConfig {
   apiKey: string;
   codeContext?: string;
   attachments?: Attachment[];
+  savedCharacters?: Array<{
+    name: string; tag: string; biography: string; framework: string;
+    frameworkName: string; blindSpot: string; heroes: string[];
+    rhetoricalTendencies: string; debateStyle: string; avatarUrl?: string;
+  }>;
   initialRawFiles?: Record<string, string>;
   updatePhase: (phase: string) => Promise<void>;
   updateRawFiles: (files: Record<string, string>) => Promise<void>;
@@ -214,13 +219,28 @@ function attachAvatars(characters: Topic["characters"], rawAvatarJson: string) {
   }
 }
 
-function buildParsedTopic(rawFiles: Record<string, string>, slug: string, topic: string): Topic {
+function buildParsedTopic(
+  rawFiles: Record<string, string>,
+  slug: string,
+  topic: string,
+  savedCharacters?: Array<{ name: string; avatarUrl?: string }>
+): Topic {
   const characters = rawFiles["characters.md"]
     ? parseCharacterFiles([rawFiles["characters.md"]])
     : [];
 
   if (rawFiles["avatar-mapping.json"]) {
     attachAvatars(characters, rawFiles["avatar-mapping.json"]);
+  }
+
+  if (savedCharacters) {
+    const savedAvatarMap = new Map(
+      savedCharacters.filter((sc) => sc.avatarUrl).map((sc) => [sc.name.toLowerCase(), sc.avatarUrl!])
+    );
+    for (const char of characters) {
+      const savedUrl = savedAvatarMap.get(char.name.toLowerCase());
+      if (savedUrl) char.avatarUrl = savedUrl;
+    }
   }
 
   const synthesisData = rawFiles["synthesis.md"]
@@ -270,7 +290,7 @@ function buildParsedTopic(rawFiles: Record<string, string>, slug: string, topic:
 }
 
 export async function runPipeline(config: PipelineConfig): Promise<void> {
-  const { topic, slug, apiKey, codeContext, attachments, initialRawFiles, updatePhase, updateRawFiles, updateParsedData } =
+  const { topic, slug, apiKey, codeContext, attachments, savedCharacters, initialRawFiles, updatePhase, updateRawFiles, updateParsedData } =
     config;
 
   const client = new Anthropic({ apiKey });
@@ -299,15 +319,17 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   // Phase 2: Character Generation
   if (!rawFiles["characters.md"]) {
     await updatePhase("character-generation");
+    const savedCount = savedCharacters?.length ?? 0;
+    const newCount = Math.max(0, metadata.characterCount - savedCount);
     const result = await callClaude(
       client,
-      characterGenerationPrompt(topic, rawFiles["domain-analysis.md"], metadata.characterCount, codeContext),
-      `Generate ${metadata.characterCount} characters + Socrate for the assembly on: ${topic}`,
+      characterGenerationPrompt(topic, rawFiles["domain-analysis.md"], newCount, codeContext, savedCharacters),
+      `Generate characters for the assembly on: ${topic}`,
       8192
     );
     rawFiles["characters.md"] = result;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 2.5: Avatar Mapping
@@ -323,7 +345,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     const cleaned = result.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
     rawFiles["avatar-mapping.json"] = cleaned;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 3: Reference Library
@@ -337,7 +359,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     );
     rawFiles["reference-library.md"] = result;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 3.5: Reference Audit
@@ -354,7 +376,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     // Replace the reference library with the audited version (which has confidence tags)
     rawFiles["reference-library.md"] = auditResult;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 4: Debate
@@ -375,7 +397,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     );
     rawFiles["debate-transcript.md"] = result;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 4.5: Maverick Round
@@ -402,7 +424,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     );
     rawFiles["synthesis.md"] = result;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 6: Deliverable
@@ -416,7 +438,7 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
     );
     rawFiles["deliverable.md"] = result;
     await updateRawFiles(rawFiles);
-    await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+    await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
   }
 
   // Phase 7: Verification (inline fixing — returns corrected deliverable)
@@ -451,5 +473,5 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   }
 
   // Build final parsed data and save
-  await updateParsedData(buildParsedTopic(rawFiles, slug, topic));
+  await updateParsedData(buildParsedTopic(rawFiles, slug, topic, savedCharacters));
 }

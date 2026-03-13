@@ -81,13 +81,23 @@ export function characterGenerationPrompt(
   topic: string,
   domainAnalysis: string,
   characterCount: number,
-  codeContext?: string
+  codeContext?: string,
+  savedCharacters?: Array<{
+    name: string; tag: string; biography: string; framework: string;
+    frameworkName: string; blindSpot: string; heroes: string[];
+    rhetoricalTendencies: string; debateStyle: string;
+  }>
 ): string {
   const codeSection = codeContext
     ? `\n\n## Codebase Reference\n\nA codebase has been linked to this assembly. Characters should be aware of and reference the actual codebase when forming their positions. The code context is available in the domain analysis.\n`
     : "";
 
-  return `You are a character architect creating a diverse intellectual assembly of ${characterCount} domain experts plus a moderator (Socrate) to debate a topic.${codeSection}
+  const savedSection = savedCharacters?.length
+    ? `\n\n## Pre-Existing Characters\n\nThe following ${savedCharacters.length} character(s) are PRE-EXISTING from previous assemblies. Keep their identity (name, tag, biography, framework, blind spot, heroes, rhetorical tendencies, debate style) intact EXACTLY as provided. Generate SPECIFIC POSITIONS for them on this new topic, and include them in the tension map.\n\n${savedCharacters.map((c, i) => `### Saved Character ${i + 1}: ${c.name} [TAG: ${c.tag}]\n\n**Biography:** ${c.biography}\n\n**Framework:** ${c.framework}\n\n**Blind Spot:** ${c.blindSpot}\n\n**Heroes:** ${c.heroes.join("; ")}\n\n**Rhetorical Tendencies:** ${c.rhetoricalTendencies}\n\n**Debate Style:** ${c.debateStyle}`).join("\n\n---\n\n")}\n\n---\n\nGenerate ${characterCount} NEW characters to complement these pre-existing ones. Ensure new characters fill any missing process roles (SKEPTIC, CRAFT, ACCESS, PRAGMATIST) and create productive tension with the pre-existing characters.\n`
+    : "";
+
+  const totalCount = characterCount + (savedCharacters?.length ?? 0);
+  return `You are a character architect creating a diverse intellectual assembly of ${totalCount} domain experts plus a moderator (Socrate) to debate a topic.${codeSection}${savedSection}
 
 ## Rules for Character Generation
 
@@ -176,7 +186,7 @@ Include at least ${Math.max(3, characterCount - 1)} pairings. Focus on non-obvio
 
 ---
 
-## Character ${characterCount + 1}: Socrate [TAG: MODERATOR]
+## Character ${totalCount + 1}: Socrate [TAG: MODERATOR]
 
 Socrate is the assembly moderator. Give Socrate a brief biography as a veteran facilitator of intellectual discourse. Socrate's role is STRICTLY:
 - Ask questions ONLY — never state positions, never offer opinions
@@ -676,6 +686,43 @@ ${insightSummaries.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 - Same format as the original deliverable (markdown, ## headings, etc.)
 - No more than 3000 words
 - The "What Changed" section should be concise — one bullet per change
+
+Topic: ${topic}`;
+}
+
+export function deliverableChatUpdatePrompt(
+  topic: string,
+  currentDeliverable: string,
+  conversationHistory: { role: string; content: string }[],
+  synthesis: string
+): string {
+  const formattedConversation = conversationHistory
+    .map((m) => `**${m.role === "user" ? "User" : "Assembly"}:** ${m.content}`)
+    .join("\n\n");
+
+  return `You are updating a deliverable document based on a conversation between the user and the intellectual assembly. The user has discussed changes, corrections, or additions they want reflected in the deliverable.
+
+## Current Deliverable
+${currentDeliverable}
+
+## Original Synthesis
+${synthesis}
+
+## Conversation
+${formattedConversation}
+
+## Instructions
+
+1. Read the current deliverable and the conversation carefully
+2. Identify what the user wants changed — corrections, additions, reframing, missing context, audience shifts, etc.
+3. Rewrite the deliverable incorporating those changes naturally
+4. Preserve sections and content that the conversation did NOT address
+5. End with a "## What Changed" section — one bullet per change, referencing what in the conversation prompted it
+
+## Format
+- Same format as the original deliverable (markdown, ## headings, etc.)
+- No more than 3000 words
+- The "What Changed" section should be concise
 
 Topic: ${topic}`;
 }

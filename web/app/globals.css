@@ -1581,6 +1581,23 @@
   color: #fff;
 }
 
+.chat-input-btn-update-deliverable {
+  background: transparent;
+  color: var(--color-accent);
+  border: 1.5px solid var(--color-accent);
+  padding: 0.28rem 0.85rem;
+}
+
+.chat-input-btn-update-deliverable:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.chat-input-btn-update-deliverable:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .chat-input-attach-btn {
   display: flex;
   align-items: center;

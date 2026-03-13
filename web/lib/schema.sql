@@ -878,3 +878,30 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS free_trial_used BOOLEAN DEFAULT FALSE
 
 ALTER TABLE assemblies ADD COLUMN IF NOT EXISTS is_free_trial BOOLEAN DEFAULT FALSE;
 ALTER TABLE assemblies ADD COLUMN IF NOT EXISTS trial_interactions_used INTEGER DEFAULT 0;
+
+-- ============================================================
+-- Saved Characters
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS saved_characters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_assembly_id UUID REFERENCES assemblies(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  biography TEXT NOT NULL,
+  framework TEXT NOT NULL,
+  framework_name TEXT NOT NULL,
+  blind_spot TEXT NOT NULL,
+  heroes JSONB DEFAULT '[]',
+  rhetorical_tendencies TEXT NOT NULL,
+  debate_style TEXT NOT NULL,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_saved_characters_user ON saved_characters(user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_characters_source ON saved_characters(source_assembly_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_characters_dedup ON saved_characters(user_id, source_assembly_id, name);
+
+ALTER TABLE assemblies
+  ADD COLUMN IF NOT EXISTS saved_character_ids JSONB DEFAULT '[]';

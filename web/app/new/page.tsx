@@ -85,6 +85,23 @@ export default function NewAssemblyPage() {
   const router = useRouter();
   const typewriterText = useTypewriter(TYPEWRITER_PROMPTS, topic.length === 0 && !submitting);
 
+  const [savedCharsExpanded, setSavedCharsExpanded] = useState(false);
+  const [savedChars, setSavedChars] = useState<Array<{ id: string; name: string; tag: string; avatar_url: string | null }>>([]);
+  const [selectedSavedIds, setSelectedSavedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/saved-characters")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setSavedChars(data); })
+      .catch(() => {});
+  }, []);
+
+  function toggleSavedChar(id: string) {
+    setSelectedSavedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
   const [githubStatus, setGithubStatus] = useState<GitHubStatus | null>(null);
   const [repoExpanded, setRepoExpanded] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
@@ -136,7 +153,7 @@ export default function NewAssemblyPage() {
     setError("");
     setSubmitting(true);
 
-    const payload: Record<string, string | boolean> = { topicInput: topic.trim() };
+    const payload: Record<string, string | boolean | string[]> = { topicInput: topic.trim() };
     if (selectedRepo) {
       payload.githubRepoOwner = selectedRepo.owner;
       payload.githubRepoName = selectedRepo.name;
@@ -144,6 +161,9 @@ export default function NewAssemblyPage() {
     }
     if (files.length > 0) {
       payload.hasFiles = true;
+    }
+    if (selectedSavedIds.length > 0) {
+      payload.savedCharacterIds = selectedSavedIds;
     }
 
     const res = await fetch("/api/assemblies", {
@@ -218,6 +238,58 @@ export default function NewAssemblyPage() {
             </div>
 
             <AttachmentWidget files={files} onChange={setFiles} disabled={submitting} />
+
+            {savedChars.length > 0 && (
+              <div className="repo-section">
+                <button
+                  type="button"
+                  className="repo-toggle"
+                  onClick={() => setSavedCharsExpanded(!savedCharsExpanded)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  Reuse saved characters ({selectedSavedIds.length}/{savedChars.length} selected)
+                  <span style={{ marginLeft: "auto", fontSize: "0.75rem" }}>
+                    {savedCharsExpanded ? "\u25B2" : "\u25BC"}
+                  </span>
+                </button>
+
+                {savedCharsExpanded && (
+                  <div className="repo-picker" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", padding: "0.75rem" }}>
+                    {savedChars.map((sc) => (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        onClick={() => toggleSavedChar(sc.id)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.4rem",
+                          padding: "0.35rem 0.7rem",
+                          borderRadius: "999px",
+                          border: selectedSavedIds.includes(sc.id)
+                            ? "1.5px solid var(--color-accent)"
+                            : "1px solid var(--color-border)",
+                          background: selectedSavedIds.includes(sc.id)
+                            ? "var(--color-accent-bg, rgba(99,102,241,0.08))"
+                            : "transparent",
+                          cursor: "pointer",
+                          fontSize: "0.82rem",
+                          color: "var(--color-text)",
+                        }}
+                      >
+                        {sc.avatar_url && (
+                          <img src={sc.avatar_url} alt="" style={{ width: 18, height: 18, borderRadius: "50%" }} />
+                        )}
+                        {sc.name}
+                        <span style={{ opacity: 0.5, fontSize: "0.75rem" }}>{sc.tag}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {githubStatus?.connected && (
               <div className="repo-section">

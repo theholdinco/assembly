@@ -29,6 +29,22 @@ export interface Character {
   avatarUrl?: string;
 }
 
+export interface SavedCharacter {
+  id: string;
+  name: string;
+  tag: string;
+  biography: string;
+  framework: string;
+  frameworkName: string;
+  blindSpot: string;
+  heroes: string[];
+  rhetoricalTendencies: string;
+  debateStyle: string;
+  avatarUrl?: string;
+  sourceAssemblyId?: string;
+  createdAt: string;
+}
+
 export interface Iteration {
   number: number;
   structure: string;

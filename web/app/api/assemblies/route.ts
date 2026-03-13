@@ -74,11 +74,22 @@ export async function POST(request: NextRequest) {
   const githubRepoBranch = body.githubRepoBranch || "main";
   const initialStatus = body.hasFiles ? "uploading" : "queued";
 
+  const savedCharacterIds: string[] = Array.isArray(body.savedCharacterIds) ? body.savedCharacterIds : [];
+  if (savedCharacterIds.length > 0) {
+    const owned = await query<{ id: string }>(
+      `SELECT id FROM saved_characters WHERE id = ANY($1) AND user_id = $2`,
+      [savedCharacterIds, user.id]
+    );
+    if (owned.length !== savedCharacterIds.length) {
+      return NextResponse.json({ error: "Invalid saved character selection" }, { status: 400 });
+    }
+  }
+
   const rows = await query<{ id: string; slug: string }>(
-    `INSERT INTO assemblies (id, user_id, slug, topic_input, status, github_repo_owner, github_repo_name, github_repo_branch, is_free_trial)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO assemblies (id, user_id, slug, topic_input, status, github_repo_owner, github_repo_name, github_repo_branch, is_free_trial, saved_character_ids)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id, slug`,
-    [user.id, slug, topicInput, initialStatus, githubRepoOwner, githubRepoName, githubRepoBranch, isTrialAssembly]
+    [user.id, slug, topicInput, initialStatus, githubRepoOwner, githubRepoName, githubRepoBranch, isTrialAssembly, JSON.stringify(savedCharacterIds)]
   );
 
   return NextResponse.json(rows[0], { status: 201 });

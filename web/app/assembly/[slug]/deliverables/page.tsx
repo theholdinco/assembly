@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { marked } from "marked";
-import { useAssembly, useAssemblyId } from "@/lib/assembly-context";
+import { useAssembly, useAssemblyId, useRefreshAssembly } from "@/lib/assembly-context";
 import FollowUpModal from "@/components/FollowUpModal";
 import HighlightChat from "@/components/HighlightChat";
 import { buildCharacterMaps, isSocrate } from "@/lib/character-utils";
@@ -15,10 +15,25 @@ function md(text: string): string {
 export default function DeliverablesPage() {
   const topic = useAssembly();
   const assemblyId = useAssemblyId();
+  const refreshAssembly = useRefreshAssembly();
   const base = `/assembly/${topic.slug}`;
   const { avatarUrlMap } = buildCharacterMaps(topic.characters);
   const [activeVersion, setActiveVersion] = useState(topic.deliverables.length - 1);
   const [showProvenance, setShowProvenance] = useState(false);
+
+  const handleUpdateDeliverable = useCallback(async (conversationHistory: { role: string; content: string }[]) => {
+    const res = await fetch(`/api/assemblies/${assemblyId}/deliverables/chat-update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationHistory }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to update deliverable");
+    }
+    await refreshAssembly();
+    setActiveVersion(1);
+  }, [assemblyId, refreshAssembly]);
   const hasVerification = topic.verification.length > 0;
   const hasReferences = !!topic.referenceLibrary;
 
@@ -148,6 +163,7 @@ export default function DeliverablesPage() {
         currentPage="deliverables"
         pageType="deliverables"
         followUps={topic.followUps}
+        onUpdateDeliverable={handleUpdateDeliverable}
       />
       <HighlightChat
         assemblyId={assemblyId}
