@@ -18,6 +18,7 @@ import { runExtraction, runSectionExtraction } from "../lib/clo/extraction/runne
 import { runPortfolioExtraction } from "../lib/clo/extraction/portfolio-extraction.js";
 import { normalizeClassName } from "../lib/clo/api.js";
 import type { CapitalStructureEntry } from "../lib/clo/types.js";
+import { getApiKeyForUser, resetFreeTrial } from "../lib/trial.js";
 
 if (!process.env.DATABASE_URL) {
   config({ path: ".env.local" });
@@ -122,8 +123,7 @@ async function processJob(job: {
   github_repo_name: string | null;
   github_repo_branch: string | null;
 }) {
-  const { encrypted, iv } = await getUserApiKey(job.user_id);
-  const apiKey = decryptApiKey(encrypted, iv);
+  const { apiKey } = await getApiKeyForUser(job.user_id);
   const slug = job.slug || slugify(job.topic_input);
 
   if (!job.slug) {
@@ -993,6 +993,16 @@ async function pollLoop() {
               "UPDATE users SET api_key_valid = false WHERE id = $1",
               [job.user_id]
             );
+          }
+          // Reset free trial if this was a trial assembly that failed
+          const trialCheck = await pool.query(
+            "SELECT is_free_trial FROM assemblies WHERE id = $1",
+            [job.id]
+          );
+          if (trialCheck.rows[0]?.is_free_trial) {
+            await resetFreeTrial(job.user_id);
+            await pool.query("DELETE FROM assemblies WHERE id = $1", [job.id]);
+            console.log(`[worker] Reset free trial for user ${job.user_id} after assembly failure`);
           }
         }
       }
