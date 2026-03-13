@@ -92,7 +92,7 @@ function GeneratingContent() {
             sessionStorage.removeItem(`generating-${routeSlug}`);
             sessionStorage.setItem(`assembly-complete-${routeSlug}`, "1");
             es.close();
-            router.push(`/assembly/${data.slug}`);
+            window.location.href = `/assembly/${data.slug}`;
           }
           break;
         case "phase":
@@ -106,7 +106,7 @@ function GeneratingContent() {
             sessionStorage.removeItem(`generating-${routeSlug}`);
             sessionStorage.setItem(`assembly-complete-${routeSlug}`, "1");
             es.close();
-            router.push(`/assembly/${data.slug}`);
+            window.location.href = `/assembly/${data.slug}`;
           }
           break;
         case "error":

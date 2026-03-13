@@ -37,7 +37,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             {this.state.error?.message || "An unexpected error occurred."}
           </p>
           <button
-            onClick={() => this.setState({ hasError: false, error: null })}
+            onClick={() => window.location.reload()}
             style={{
               padding: "0.5rem 1rem",
               background: "var(--color-accent)",
@@ -48,7 +48,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               fontSize: "0.85rem",
             }}
           >
-            Try again
+            Reload page
           </button>
         </div>
       );

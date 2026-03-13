@@ -1,11 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
-export function WaitForData({ assemblyId, slug }: { assemblyId: string; slug: string }) {
-  const router = useRouter();
-
+export function WaitForData({ assemblyId }: { assemblyId: string; slug: string }) {
   useEffect(() => {
     const interval = setInterval(async () => {
       const res = await fetch(`/api/assemblies/${assemblyId}`);
@@ -13,12 +10,12 @@ export function WaitForData({ assemblyId, slug }: { assemblyId: string; slug: st
       const data = await res.json();
       if (data.parsed_data) {
         clearInterval(interval);
-        router.refresh();
+        window.location.reload();
       }
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [assemblyId, slug, router]);
+  }, [assemblyId]);
 
   return (
     <div className="standalone-page">
