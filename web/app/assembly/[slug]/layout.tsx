@@ -105,6 +105,18 @@ export default async function AssemblyLayout({
         </GeneratingRedirect>
       );
     }
+    // Status is "complete" but parsed_data is still null — worker hasn't
+    // finished writing. Use WaitForData to poll until data appears.
+    if (rows[0].status === "complete") {
+      const { WaitForData } = await import("./wait-for-data");
+      return (
+        <AssemblyErrorBoundary>
+          <main className="no-nav">
+            <WaitForData assemblyId={rows[0].id} slug={slug} />
+          </main>
+        </AssemblyErrorBoundary>
+      );
+    }
     return (
       <AssemblyErrorBoundary>
         <main className="no-nav">{children}</main>
