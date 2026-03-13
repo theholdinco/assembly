@@ -28,16 +28,21 @@ export default async function Dashboard() {
 
   const userId = session.user.id;
 
-  const userRows = await query<{ api_key_valid: boolean | null; api_key_prefix: string | null }>(
-    "SELECT api_key_valid, api_key_prefix FROM users WHERE id = $1",
+  const userRows = await query<{
+    api_key_valid: boolean | null;
+    api_key_prefix: string | null;
+    free_trial_used: boolean;
+  }>(
+    "SELECT api_key_valid, api_key_prefix, free_trial_used FROM users WHERE id = $1",
     [userId]
   );
 
-  if (!userRows[0]?.api_key_prefix) {
+  const hasApiKey = !!userRows[0]?.api_key_prefix;
+  const freeTrialAvailable = !hasApiKey && !userRows[0]?.free_trial_used;
+
+  if (!hasApiKey && !freeTrialAvailable) {
     redirect("/onboarding");
   }
-
-  const user = userRows[0];
 
   const [ownAssemblies, sharedAssemblies] = await Promise.all([
     query<AssemblyRow>(
@@ -65,9 +70,14 @@ export default async function Dashboard() {
 
   return (
     <div className="dashboard">
-      {user.api_key_valid === false && (
+      {userRows[0]?.api_key_valid === false && hasApiKey && (
         <div className="api-key-warning">
           Your API key is no longer valid. <a href="/onboarding">Update it</a> to continue using Million Minds.
+        </div>
+      )}
+      {freeTrialAvailable && (
+        <div className="api-key-warning" style={{ borderColor: "var(--color-high)" }}>
+          Free trial — 1 panel + 5 interactions. <a href="/onboarding">Add your API key</a> for unlimited access.
         </div>
       )}
 
