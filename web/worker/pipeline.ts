@@ -130,13 +130,16 @@ function buildAttachmentContent(
   return blocks;
 }
 
+const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 5 };
+
 async function callClaude(
   client: Anthropic,
   systemPrompt: string,
   userMessage: string,
   maxTokens: number,
   model: string = "claude-sonnet-4-20250514",
-  attachments?: Attachment[]
+  attachments?: Attachment[],
+  tools?: Array<Record<string, unknown>>
 ): Promise<string> {
   try {
     const content: Anthropic.MessageCreateParams["messages"][0]["content"] =
@@ -149,7 +152,8 @@ async function callClaude(
       max_tokens: maxTokens,
       messages: [{ role: "user", content }],
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-    });
+      ...(tools && tools.length > 0 ? { tools } : {}),
+    } as Anthropic.MessageCreateParams) as Anthropic.Message;
 
     return response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
@@ -307,7 +311,8 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
       `Analyze this topic: ${topic}`,
       8192,
       undefined,
-      attachments
+      attachments,
+      [WEB_SEARCH_TOOL]
     );
     rawFiles["domain-analysis.md"] = result;
     await updateRawFiles(rawFiles);
@@ -355,7 +360,10 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
       client,
       referenceLibraryPrompt(topic, rawFiles["characters.md"]),
       `Build the reference library for the assembly on: ${topic}`,
-      8192
+      8192,
+      undefined,
+      undefined,
+      [WEB_SEARCH_TOOL]
     );
     rawFiles["reference-library.md"] = result;
     await updateRawFiles(rawFiles);
@@ -393,7 +401,8 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
       `Run the ${metadata.debateStructure} debate on: ${topic}`,
       16384,
       undefined,
-      attachments
+      attachments,
+      [WEB_SEARCH_TOOL]
     );
     rawFiles["debate-transcript.md"] = result;
     await updateRawFiles(rawFiles);
@@ -420,7 +429,10 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
       client,
       synthesisPrompt(topic, rawFiles["debate-transcript.md"], rawFiles["maverick-round.md"]),
       `Synthesize the debate on: ${topic}`,
-      8192
+      8192,
+      undefined,
+      undefined,
+      [WEB_SEARCH_TOOL]
     );
     rawFiles["synthesis.md"] = result;
     await updateRawFiles(rawFiles);
@@ -452,7 +464,10 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
         rawFiles["synthesis.md"]
       ),
       `Verify and fix the deliverable for: ${topic}`,
-      8192
+      8192,
+      undefined,
+      undefined,
+      [WEB_SEARCH_TOOL]
     );
 
     // Store original deliverable for reference
