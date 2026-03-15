@@ -12,13 +12,15 @@
     "dev:ic-worker": "npx tsx worker/ic-index.ts",
     "dev:all": "npx tsx worker/index.ts & npx tsx worker/ic-index.ts & next dev & wait",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "france:ingest": "npx tsx scripts/france-ingest.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",
     "@auth/core": "^0.41.0",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.3.1",
+    "duckdb": "^1.4.4",
     "marked": "^17.0.3",
     "next": "16.1.6",
     "next-auth": "^5.0.0-beta.30",
@@ -26,6 +28,7 @@
     "pg": "^8.18.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "recharts": "^3.8.0",
     "rss-parser": "^3.13.0",
     "undici": "^7.22.0",
     "zod": "^4.3.6",
