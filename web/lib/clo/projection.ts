@@ -281,7 +281,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
           survivingPar: reinvestment,
           ratingBucket: reinvestmentRating,
           spreadBps: reinvestmentSpreadBps,
-          maturityQuarter: totalQuarters,
+          maturityQuarter: Math.min(q + 20, totalQuarters), // 5-year tenor (20 quarters)
         });
       }
     }
