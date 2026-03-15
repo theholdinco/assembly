@@ -100,7 +100,7 @@ export default async function AssemblyLayout({
       return (
         <GeneratingRedirect slug={slug}>
           <AssemblyErrorBoundary>
-            <main className="no-nav">{children}</main>
+            <main className="no-nav" />
           </AssemblyErrorBoundary>
         </GeneratingRedirect>
       );
@@ -119,7 +119,7 @@ export default async function AssemblyLayout({
     }
     return (
       <AssemblyErrorBoundary>
-        <main className="no-nav">{children}</main>
+        <main className="no-nav" />
       </AssemblyErrorBoundary>
     );
   }

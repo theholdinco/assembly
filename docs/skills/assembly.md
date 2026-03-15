@@ -2,6 +2,27 @@
 
 All prompts used in the Intellectual Assembly / FO pipeline, extracted from `web/worker/prompts.ts` and `web/lib/follow-up-prompts.ts`. Data interpolation replaced with `[PLACEHOLDERS]`. Prompt text is otherwise verbatim. `SOURCE_HONESTY_RULES` inlined wherever injected.
 
+## API: Pipeline Options
+
+When creating an assembly via `POST /api/assemblies`, you can pass an optional `pipelineOptions` object to control pipeline behavior:
+
+```json
+{
+  "topicInput": "...",
+  "pipelineOptions": {
+    "skipVerification": true
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `skipVerification` | `boolean` | `false` | Skip the verification phase entirely. The deliverable is returned as-is from the synthesis/deliverable phase. |
+
+**Date awareness:** All pipeline prompts automatically include the current date (`Today's date is YYYY-MM-DD.`) so the model can reason correctly about temporal claims.
+
+**Non-blocking verification:** Even when verification runs, it never fails the assembly. If the verification agent refuses (e.g., due to perceived temporal impossibility) or errors out, the original deliverable is preserved and the failure reason is recorded in the verification notes.
+
 ---
 
 ## 1. Domain Analysis
@@ -735,6 +756,10 @@ Characters:
 ---
 
 ## 10. Verification
+
+**Optional phase.** Can be skipped by passing `pipelineOptions: { skipVerification: true }` when creating the assembly. When skipped, the verification notes will read "Verification was skipped by user request."
+
+**Non-blocking.** If verification fails (model refusal, API error, temporal impossibility flag), the original deliverable is preserved as-is and the failure reason is recorded in the verification notes. Verification never causes the assembly to fail.
 
 **System/User prompt (single prompt):**
 

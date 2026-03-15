@@ -40,6 +40,7 @@ export interface PipelineConfig {
     rhetoricalTendencies: string; debateStyle: string; avatarUrl?: string;
   }>;
   initialRawFiles?: Record<string, string>;
+  skipVerification?: boolean;
   updatePhase: (phase: string) => Promise<void>;
   updateRawFiles: (files: Record<string, string>) => Promise<void>;
   updateParsedData: (data: unknown) => Promise<void>;
@@ -147,11 +148,13 @@ async function callClaude(
         ? buildAttachmentContent(attachments, userMessage)
         : userMessage;
 
+    const datePrefix = `Today's date is ${new Date().toISOString().split("T")[0]}.\n\n`;
+
     const response = await client.messages.create({
       model,
       max_tokens: maxTokens,
       messages: [{ role: "user", content }],
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: datePrefix + systemPrompt, cache_control: { type: "ephemeral" } }],
       ...(tools && tools.length > 0 ? { tools } : {}),
     } as Anthropic.MessageCreateParams) as Anthropic.Message;
 
@@ -294,7 +297,7 @@ function buildParsedTopic(
 }
 
 export async function runPipeline(config: PipelineConfig): Promise<void> {
-  const { topic, slug, apiKey, codeContext, attachments, savedCharacters, initialRawFiles, updatePhase, updateRawFiles, updateParsedData } =
+  const { topic, slug, apiKey, codeContext, attachments, savedCharacters, initialRawFiles, skipVerification, updatePhase, updateRawFiles, updateParsedData } =
     config;
 
   const client = new Anthropic({ apiKey });
@@ -454,36 +457,58 @@ export async function runPipeline(config: PipelineConfig): Promise<void> {
   }
 
   // Phase 7: Verification (inline fixing — returns corrected deliverable)
-  if (!rawFiles["verification-notes.md"]) {
+  if (!rawFiles["verification-notes.md"] && !skipVerification) {
     await updatePhase("verification");
-    const result = await callClaude(
-      client,
-      verificationPrompt(
-        topic,
-        rawFiles["deliverable.md"],
-        rawFiles["synthesis.md"]
-      ),
-      `Verify and fix the deliverable for: ${topic}`,
-      8192,
-      undefined,
-      undefined,
-      [WEB_SEARCH_TOOL]
-    );
+    try {
+      const result = await callClaude(
+        client,
+        verificationPrompt(
+          topic,
+          rawFiles["deliverable.md"],
+          rawFiles["synthesis.md"]
+        ),
+        `Verify and fix the deliverable for: ${topic}`,
+        8192,
+        undefined,
+        undefined,
+        [WEB_SEARCH_TOOL]
+      );
 
-    // Store original deliverable for reference
-    rawFiles["deliverable-pre-verification.md"] = rawFiles["deliverable.md"];
+      // Detect refusals — model may refuse if it misjudges temporal/factual feasibility
+      const refusalPatterns = [
+        /I cannot (produce|generate|create|write|verify)/i,
+        /this is a future date/i,
+        /temporal impossibility/i,
+        /I('m| am) unable to/i,
+      ];
+      const isRefusal = refusalPatterns.some((p) => p.test(result));
 
-    // Parse: everything before "## Verification Notes" is the corrected deliverable
-    const notesMarker = result.indexOf("## Verification Notes");
-    if (notesMarker !== -1) {
-      rawFiles["deliverable.md"] = result.slice(0, notesMarker).trim();
-      rawFiles["verification-notes.md"] = result.slice(notesMarker).trim();
-    } else {
-      // Fallback: treat entire result as corrected deliverable
-      rawFiles["deliverable.md"] = result;
-      rawFiles["verification-notes.md"] = "## Verification Notes\n\nNo explicit notes section returned by verifier.";
+      if (isRefusal) {
+        rawFiles["verification-notes.md"] =
+          `## Verification Notes\n\nVerification could not complete. The verification agent returned a refusal:\n\n> ${result.slice(0, 500)}\n\nThe original deliverable has been preserved as-is.`;
+      } else {
+        // Store original deliverable for reference
+        rawFiles["deliverable-pre-verification.md"] = rawFiles["deliverable.md"];
+
+        // Parse: everything before "## Verification Notes" is the corrected deliverable
+        const notesMarker = result.indexOf("## Verification Notes");
+        if (notesMarker !== -1) {
+          rawFiles["deliverable.md"] = result.slice(0, notesMarker).trim();
+          rawFiles["verification-notes.md"] = result.slice(notesMarker).trim();
+        } else {
+          rawFiles["deliverable.md"] = result;
+          rawFiles["verification-notes.md"] = "## Verification Notes\n\nNo explicit notes section returned by verifier.";
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      rawFiles["verification-notes.md"] =
+        `## Verification Notes\n\nVerification failed: ${message}\n\nThe original deliverable has been preserved as-is.`;
     }
 
+    await updateRawFiles(rawFiles);
+  } else if (skipVerification && !rawFiles["verification-notes.md"]) {
+    rawFiles["verification-notes.md"] = "## Verification Notes\n\nVerification was skipped by user request.";
     await updateRawFiles(rawFiles);
   }
 

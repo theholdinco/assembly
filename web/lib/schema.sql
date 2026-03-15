@@ -905,3 +905,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_characters_dedup ON saved_characters
 
 ALTER TABLE assemblies
   ADD COLUMN IF NOT EXISTS saved_character_ids JSONB DEFAULT '[]';
+
+ALTER TABLE assemblies
+  ADD COLUMN IF NOT EXISTS pipeline_options JSONB DEFAULT '{}';

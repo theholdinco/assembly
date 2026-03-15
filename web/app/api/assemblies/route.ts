@@ -74,6 +74,8 @@ export async function POST(request: NextRequest) {
   const githubRepoBranch = body.githubRepoBranch || "main";
   const initialStatus = body.hasFiles ? "uploading" : "queued";
 
+  const pipelineOptions = body.pipelineOptions ?? {};
+
   const savedCharacterIds: string[] = Array.isArray(body.savedCharacterIds) ? body.savedCharacterIds : [];
   if (savedCharacterIds.length > 0) {
     const owned = await query<{ id: string }>(
@@ -86,10 +88,10 @@ export async function POST(request: NextRequest) {
   }
 
   const rows = await query<{ id: string; slug: string }>(
-    `INSERT INTO assemblies (id, user_id, slug, topic_input, status, github_repo_owner, github_repo_name, github_repo_branch, is_free_trial, saved_character_ids)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO assemblies (id, user_id, slug, topic_input, status, github_repo_owner, github_repo_name, github_repo_branch, is_free_trial, saved_character_ids, pipeline_options)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id, slug`,
-    [user.id, slug, topicInput, initialStatus, githubRepoOwner, githubRepoName, githubRepoBranch, isTrialAssembly, JSON.stringify(savedCharacterIds)]
+    [user.id, slug, topicInput, initialStatus, githubRepoOwner, githubRepoName, githubRepoBranch, isTrialAssembly, JSON.stringify(savedCharacterIds), JSON.stringify(pipelineOptions)]
   );
 
   return NextResponse.json(rows[0], { status: 201 });

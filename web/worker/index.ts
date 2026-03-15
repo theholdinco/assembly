@@ -83,6 +83,7 @@ async function claimJob(): Promise<{
   github_repo_name: string | null;
   github_repo_branch: string | null;
   saved_character_ids: string[];
+  pipeline_options: Record<string, unknown> | null;
 } | null> {
   const result = await pool.query(
     `UPDATE assemblies SET status = 'running', current_phase = 'domain-analysis'
@@ -91,7 +92,7 @@ async function claimJob(): Promise<{
        ORDER BY created_at LIMIT 1
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING id, topic_input, user_id, raw_files, attachments, slug, github_repo_owner, github_repo_name, github_repo_branch, saved_character_ids`
+     RETURNING id, topic_input, user_id, raw_files, attachments, slug, github_repo_owner, github_repo_name, github_repo_branch, saved_character_ids, pipeline_options`
   );
   return result.rows[0] ?? null;
 }
@@ -124,6 +125,7 @@ async function processJob(job: {
   github_repo_name: string | null;
   github_repo_branch: string | null;
   saved_character_ids: string[];
+  pipeline_options: Record<string, unknown> | null;
 }) {
   const { apiKey } = await getApiKeyForUser(job.user_id);
   const slug = job.slug || slugify(job.topic_input);
@@ -195,6 +197,8 @@ async function processJob(job: {
     console.log(`[worker] Assembly ${job.id}: ${savedCharacters.length} saved character(s)`);
   }
 
+  const pipelineOptions = job.pipeline_options ?? {};
+
   await runPipeline({
     assemblyId: job.id,
     topic: job.topic_input,
@@ -204,6 +208,7 @@ async function processJob(job: {
     attachments,
     savedCharacters,
     initialRawFiles: job.raw_files || {},
+    skipVerification: pipelineOptions.skipVerification === true,
     updatePhase: async (phase: string) => {
       await pool.query(
         `UPDATE assemblies SET current_phase = $1 WHERE id = $2`,
