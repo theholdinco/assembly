@@ -8,6 +8,7 @@ import {
   ingestAllYears,
   updateSyncMeta,
 } from "../lib/france/ingest";
+import { enrichBuyerNames, enrichVendorNames } from "../lib/france/enrich";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
@@ -40,16 +41,22 @@ async function runIngestion() {
     const { shouldDownload, lastModified, contentLength } =
       await checkForUpdates(pool);
 
-    if (!shouldDownload) {
+    if (shouldDownload) {
+      console.log("[france-ingest] New data available, ingesting...");
+      const stats = await ingestAllYears(pool);
+      await updateSyncMeta(pool, lastModified, contentLength, stats);
+      console.log("[france-ingest] Done:", JSON.stringify(stats));
+    } else {
       console.log("[france-ingest] Data is up to date, skipping.");
-      return;
     }
 
-    console.log("[france-ingest] New data available, ingesting...");
-    const stats = await ingestAllYears(pool);
-    await updateSyncMeta(pool, lastModified, contentLength, stats);
-
-    console.log("[france-ingest] Done:", JSON.stringify(stats));
+    // Always enrich — picks up where it left off (only queries WHERE name IS NULL)
+    console.log("[france-enrich] Starting name enrichment from SIRENE...");
+    const buyersEnriched = await enrichBuyerNames(pool);
+    const vendorsEnriched = await enrichVendorNames(pool);
+    console.log(
+      `[france-enrich] Done: ${buyersEnriched} buyers, ${vendorsEnriched} vendors enriched`
+    );
   } catch (err) {
     console.error("[france-ingest] Failed:", err);
   } finally {
