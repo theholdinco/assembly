@@ -82,14 +82,14 @@ export function validateInputs(inputs: ProjectionInputs): { field: string; messa
   return errors;
 }
 
-function quartersBetween(startIso: string, endIso: string): number {
+export function quartersBetween(startIso: string, endIso: string): number {
   const start = new Date(startIso);
   const end = new Date(endIso);
   const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
   return Math.ceil(months / 3);
 }
 
-function addQuarters(dateIso: string, quarters: number): string {
+export function addQuarters(dateIso: string, quarters: number): string {
   const d = new Date(dateIso);
   d.setMonth(d.getMonth() + quarters * 3);
   return d.toISOString().slice(0, 10);

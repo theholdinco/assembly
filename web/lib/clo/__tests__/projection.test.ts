@@ -3,17 +3,11 @@ import {
   validateInputs,
   runProjection,
   calculateIrr,
+  addQuarters,
   ProjectionInputs,
   LoanInput,
 } from "../projection";
 import { RATING_BUCKETS, DEFAULT_RATES_BY_RATING } from "../rating-mapping";
-
-// Helper to compute a date N quarters from a start date (mirrors engine logic)
-function addQuartersHelper(dateIso: string, quarters: number): string {
-  const d = new Date(dateIso);
-  d.setMonth(d.getMonth() + quarters * 3);
-  return d.toISOString().slice(0, 10);
-}
 
 // Helper: set all rating buckets to the same CDR (equivalent to old single cdrPct)
 function uniformRates(cdr: number): Record<string, number> {
@@ -24,7 +18,7 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
   // Default: 10 loans, all B-rated, $10M each, staggered maturities Q8-Q17
   const defaultLoans: LoanInput[] = Array.from({ length: 10 }, (_, i) => ({
     parBalance: 10_000_000,
-    maturityDate: addQuartersHelper("2026-03-09", 8 + i),
+    maturityDate: addQuarters("2026-03-09", 8 + i),
     ratingBucket: "B",
     spreadBps: 375,
   }));
@@ -172,8 +166,8 @@ describe("calculateIrr", () => {
 describe("per-loan model — maturity correctness", () => {
   it("zero residual par after all loans mature (no defaults, no prepay)", () => {
     const loans = [
-      { parBalance: 50_000_000, maturityDate: addQuartersHelper("2026-03-09", 4), ratingBucket: "B", spreadBps: 375 },
-      { parBalance: 50_000_000, maturityDate: addQuartersHelper("2026-03-09", 4), ratingBucket: "B", spreadBps: 375 },
+      { parBalance: 50_000_000, maturityDate: addQuarters("2026-03-09", 4), ratingBucket: "B", spreadBps: 375 },
+      { parBalance: 50_000_000, maturityDate: addQuarters("2026-03-09", 4), ratingBucket: "B", spreadBps: 375 },
     ];
     const result = runProjection(makeInputs({
       loans,
@@ -191,7 +185,7 @@ describe("per-loan model — maturity correctness", () => {
   });
 
   it("surviving par at maturity reflects defaults (not original par)", () => {
-    const loans = [{ parBalance: 100_000_000, maturityDate: addQuartersHelper("2026-03-09", 8), ratingBucket: "CCC", spreadBps: 375 }];
+    const loans = [{ parBalance: 100_000_000, maturityDate: addQuarters("2026-03-09", 8), ratingBucket: "CCC", spreadBps: 375 }];
     const rates = { ...uniformRates(0), CCC: 10.28 };
     const result = runProjection(makeInputs({
       loans,
@@ -206,8 +200,8 @@ describe("per-loan model — maturity correctness", () => {
   });
 
   it("different ratings produce different default amounts", () => {
-    const loansB = [{ parBalance: 100_000_000, maturityDate: addQuartersHelper("2026-03-09", 20), ratingBucket: "B", spreadBps: 375 }];
-    const loansBB = [{ parBalance: 100_000_000, maturityDate: addQuartersHelper("2026-03-09", 20), ratingBucket: "BB", spreadBps: 375 }];
+    const loansB = [{ parBalance: 100_000_000, maturityDate: addQuarters("2026-03-09", 20), ratingBucket: "B", spreadBps: 375 }];
+    const loansBB = [{ parBalance: 100_000_000, maturityDate: addQuarters("2026-03-09", 20), ratingBucket: "BB", spreadBps: 375 }];
     const resultB = runProjection(makeInputs({ loans: loansB, cprPct: 0, reinvestmentPeriodEnd: null }));
     const resultBB = runProjection(makeInputs({ loans: loansBB, cprPct: 0, reinvestmentPeriodEnd: null }));
     const totalDefaultsB = resultB.periods.reduce((s, p) => s + p.defaults, 0);
@@ -227,7 +221,7 @@ describe("per-loan model — maturity correctness", () => {
 
 describe("per-loan model — loan maturities", () => {
   it("loan maturing in Q4 reduces par in that period", () => {
-    const matDate = addQuartersHelper("2026-03-09", 4);
+    const matDate = addQuarters("2026-03-09", 4);
     const loans = [
       { parBalance: 5_000_000, maturityDate: matDate, ratingBucket: "B", spreadBps: 375 },
       { parBalance: 95_000_000, maturityDate: "2034-06-15", ratingBucket: "B", spreadBps: 375 },
@@ -244,7 +238,7 @@ describe("per-loan model — loan maturities", () => {
   });
 
   it("matured par stops earning interest", () => {
-    const matDate = addQuartersHelper("2026-03-09", 2);
+    const matDate = addQuarters("2026-03-09", 2);
     const withMat = runProjection(makeInputs({
       loans: [
         { parBalance: 30_000_000, maturityDate: matDate, ratingBucket: "B", spreadBps: 375 },
@@ -266,7 +260,7 @@ describe("per-loan model — loan maturities", () => {
   });
 
   it("maturities during RP are reinvested", () => {
-    const matDate = addQuartersHelper("2026-03-09", 2);
+    const matDate = addQuarters("2026-03-09", 2);
     const result = runProjection(makeInputs({
       loans: [
         { parBalance: 10_000_000, maturityDate: matDate, ratingBucket: "B", spreadBps: 375 },
@@ -280,7 +274,7 @@ describe("per-loan model — loan maturities", () => {
   });
 
   it("maturities post-RP flow to principal paydown", () => {
-    const matDate = addQuartersHelper("2026-03-09", 12);
+    const matDate = addQuarters("2026-03-09", 12);
     const withMat = runProjection(makeInputs({
       loans: [
         { parBalance: 10_000_000, maturityDate: matDate, ratingBucket: "B", spreadBps: 375 },
@@ -302,7 +296,7 @@ describe("per-loan model — loan maturities", () => {
   });
 
   it("multiple loans maturing in same quarter are aggregated", () => {
-    const matDate = addQuartersHelper("2026-03-09", 3);
+    const matDate = addQuarters("2026-03-09", 3);
     const result = runProjection(makeInputs({
       loans: [
         { parBalance: 5_000_000, maturityDate: matDate, ratingBucket: "B", spreadBps: 375 },
