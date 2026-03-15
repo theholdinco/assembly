@@ -10,6 +10,11 @@ import {
   TopEntity,
 } from "./types";
 
+// Sanity filters for known data quality issues in DECP source
+const SANE_AMOUNT = "amount_ht < 10000000000"; // no single contract > 10B€
+const SANE_DATE = "notification_date >= '2010-01-01' AND notification_date <= '2030-12-31'";
+const SANE_BIDS = "bids_received < 1000";
+
 // --- Dashboard ---
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -22,10 +27,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }>(`
     SELECT
       COUNT(*)::text                                          AS total_contracts,
-      COALESCE(SUM(amount_ht), 0)::text                      AS total_spend,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN amount_ht END), 0)::text AS total_spend,
       COUNT(DISTINCT buyer_siret)::text                      AS unique_buyers,
       (SELECT COUNT(*)::text FROM france_vendors)            AS unique_vendors,
-      COALESCE(AVG(NULLIF(bids_received, 0)), 0)::text       AS avg_bids
+      COALESCE(AVG(NULLIF(bids_received, 0)) FILTER (WHERE ${SANE_BIDS}), 0)::text AS avg_bids
     FROM france_contracts
   `);
   const r = rows[0];
@@ -34,7 +39,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     total_spend: Number(r.total_spend),
     unique_buyers: Number(r.unique_buyers),
     unique_vendors: Number(r.unique_vendors),
-    avg_bids: Number(r.avg_bids),
+    avg_bids: Math.round(Number(r.avg_bids) * 10) / 10,
   };
 }
 
@@ -46,10 +51,10 @@ export async function getSpendByYear(): Promise<SpendByYear[]> {
   }>(`
     SELECT
       EXTRACT(YEAR FROM notification_date)::text  AS year,
-      COALESCE(SUM(amount_ht), 0)::text           AS total_amount,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                              AS contract_count
     FROM france_contracts
-    WHERE notification_date IS NOT NULL
+    WHERE notification_date IS NOT NULL AND ${SANE_DATE}
     GROUP BY EXTRACT(YEAR FROM notification_date)
     ORDER BY year
   `);
@@ -64,13 +69,20 @@ export async function getTopBuyers(limit = 10): Promise<TopEntity[]> {
   const rows = await query<{
     siret: string;
     name: string;
-    total_amount_ht: string;
+    total_amount: string;
     contract_count: string;
   }>(
     `
-    SELECT siret, name, total_amount_ht::text, contract_count::text
-    FROM france_buyers
-    ORDER BY total_amount_ht DESC
+    SELECT
+      c.buyer_siret AS siret,
+      COALESCE(b.name, c.buyer_siret) AS name,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
+      COUNT(*)::text AS contract_count
+    FROM france_contracts c
+    LEFT JOIN france_buyers b ON b.siret = c.buyer_siret
+    WHERE c.buyer_siret IS NOT NULL
+    GROUP BY c.buyer_siret, b.name
+    ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $1
   `,
     [limit]
@@ -78,7 +90,7 @@ export async function getTopBuyers(limit = 10): Promise<TopEntity[]> {
   return rows.map((r) => ({
     id: r.siret,
     name: r.name,
-    total_amount: Number(r.total_amount_ht),
+    total_amount: Number(r.total_amount),
     contract_count: Number(r.contract_count),
   }));
 }
@@ -87,13 +99,20 @@ export async function getTopVendors(limit = 10): Promise<TopEntity[]> {
   const rows = await query<{
     id: string;
     name: string;
-    total_amount_ht: string;
+    total_amount: string;
     contract_count: string;
   }>(
     `
-    SELECT id, name, total_amount_ht::text, contract_count::text
-    FROM france_vendors
-    ORDER BY total_amount_ht DESC
+    SELECT
+      cv.vendor_id AS id,
+      COALESCE(v.name, cv.vendor_id) AS name,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
+      COUNT(DISTINCT c.uid)::text AS contract_count
+    FROM france_contract_vendors cv
+    JOIN france_contracts c ON c.uid = cv.contract_uid
+    LEFT JOIN france_vendors v ON v.id = cv.vendor_id
+    GROUP BY cv.vendor_id, v.name
+    ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $1
   `,
     [limit]
@@ -101,7 +120,7 @@ export async function getTopVendors(limit = 10): Promise<TopEntity[]> {
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
-    total_amount: Number(r.total_amount_ht),
+    total_amount: Number(r.total_amount),
     contract_count: Number(r.contract_count),
   }));
 }
@@ -113,8 +132,11 @@ export async function getProcedureBreakdown(): Promise<ProcedureBreakdown[]> {
     contract_count: string;
     pct: string;
   }>(`
-    WITH totals AS (
-      SELECT SUM(amount_ht) AS grand_total FROM france_contracts
+    WITH filtered AS (
+      SELECT * FROM france_contracts WHERE ${SANE_AMOUNT}
+    ),
+    totals AS (
+      SELECT SUM(amount_ht) AS grand_total FROM filtered
     )
     SELECT
       COALESCE(procedure, 'Non renseigné')                         AS procedure,
@@ -122,9 +144,9 @@ export async function getProcedureBreakdown(): Promise<ProcedureBreakdown[]> {
       COUNT(*)::text                                               AS contract_count,
       ROUND(
         COALESCE(SUM(amount_ht), 0) / NULLIF((SELECT grand_total FROM totals), 0) * 100,
-        2
+        1
       )::text                                                      AS pct
-    FROM france_contracts
+    FROM filtered
     GROUP BY procedure
     ORDER BY SUM(amount_ht) DESC NULLS LAST
   `);
@@ -169,7 +191,7 @@ export async function getContracts(
     pageSize = 50,
   } = filters;
 
-  const conditions: string[] = [];
+  const conditions: string[] = [SANE_AMOUNT];
   const params: unknown[] = [];
 
   if (yearFrom !== undefined) {
@@ -214,7 +236,7 @@ export async function getContracts(
     );
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
   const countRows = await query<{ total: string }>(
     `SELECT COUNT(*)::text AS total FROM france_contracts ${where}`,
@@ -256,7 +278,7 @@ export async function getContractVendors(
   uid: string
 ): Promise<{ vendor_id: string; vendor_name: string }[]> {
   return query<{ vendor_id: string; vendor_name: string }>(
-    `SELECT vendor_id, vendor_name FROM france_contract_vendors WHERE contract_uid = $1`,
+    `SELECT vendor_id, COALESCE(vendor_name, vendor_id) AS vendor_name FROM france_contract_vendors WHERE contract_uid = $1`,
     [uid]
   );
 }
@@ -278,13 +300,13 @@ export async function getVendorById(id: string): Promise<FranceVendor | null> {
 export async function getVendorContracts(
   vendorId: string,
   limit = 50
-): Promise<FranceContract[]> {
-  return query<FranceContract>(
+): Promise<(FranceContract & { buyer_siret: string; buyer_name: string })[]> {
+  return query<FranceContract & { buyer_siret: string; buyer_name: string }>(
     `
     SELECT c.*
     FROM france_contracts c
     JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
-    WHERE cv.vendor_id = $1
+    WHERE cv.vendor_id = $1 AND ${SANE_AMOUNT}
     ORDER BY c.amount_ht DESC NULLS LAST
     LIMIT $2
     `,
@@ -305,14 +327,14 @@ export async function getVendorTopBuyers(
     `
     SELECT
       c.buyer_siret                     AS siret,
-      c.buyer_name                      AS name,
-      COALESCE(SUM(c.amount_ht), 0)::text AS total_amount,
+      COALESCE(c.buyer_name, c.buyer_siret) AS name,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                    AS contract_count
     FROM france_contracts c
     JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
     WHERE cv.vendor_id = $1
     GROUP BY c.buyer_siret, c.buyer_name
-    ORDER BY SUM(c.amount_ht) DESC NULLS LAST
+    ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $2
     `,
     [vendorId, limit]
@@ -342,7 +364,7 @@ export async function getBuyerContracts(
   return query<FranceContract>(
     `
     SELECT * FROM france_contracts
-    WHERE buyer_siret = $1
+    WHERE buyer_siret = $1 AND ${SANE_AMOUNT}
     ORDER BY amount_ht DESC NULLS LAST
     LIMIT $2
     `,
@@ -363,14 +385,14 @@ export async function getBuyerTopVendors(
     `
     SELECT
       cv.vendor_id                        AS id,
-      cv.vendor_name                      AS name,
-      COALESCE(SUM(c.amount_ht), 0)::text AS total_amount,
+      COALESCE(cv.vendor_name, cv.vendor_id) AS name,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                      AS contract_count
     FROM france_contracts c
     JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
     WHERE c.buyer_siret = $1
     GROUP BY cv.vendor_id, cv.vendor_name
-    ORDER BY SUM(c.amount_ht) DESC NULLS LAST
+    ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $2
     `,
     [siret, limit]
@@ -393,10 +415,11 @@ export async function getBuyerProcedureBreakdown(
     pct: string;
   }>(
     `
-    WITH totals AS (
-      SELECT SUM(amount_ht) AS grand_total
-      FROM france_contracts
-      WHERE buyer_siret = $1
+    WITH filtered AS (
+      SELECT * FROM france_contracts WHERE buyer_siret = $1 AND ${SANE_AMOUNT}
+    ),
+    totals AS (
+      SELECT SUM(amount_ht) AS grand_total FROM filtered
     )
     SELECT
       COALESCE(procedure, 'Non renseigné')                         AS procedure,
@@ -404,10 +427,9 @@ export async function getBuyerProcedureBreakdown(
       COUNT(*)::text                                               AS contract_count,
       ROUND(
         COALESCE(SUM(amount_ht), 0) / NULLIF((SELECT grand_total FROM totals), 0) * 100,
-        2
+        1
       )::text                                                      AS pct
-    FROM france_contracts
-    WHERE buyer_siret = $1
+    FROM filtered
     GROUP BY procedure
     ORDER BY SUM(amount_ht) DESC NULLS LAST
     `,
@@ -427,9 +449,17 @@ export async function getVendorConcentration(
   cpvDivision?: string,
   limit = 20
 ): Promise<(TopEntity & { market_share: number })[]> {
-  const conditions = cpvDivision ? `WHERE c.cpv_division = $1` : "";
-  const params: unknown[] = cpvDivision ? [cpvDivision, limit] : [limit];
+  const conditions = [`${SANE_AMOUNT}`];
+  const params: unknown[] = [];
+
+  if (cpvDivision) {
+    params.push(cpvDivision);
+    conditions.push(`c.cpv_division = $${params.length}`);
+  }
+
+  params.push(limit);
   const limitParam = `$${params.length}`;
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
   const rows = await query<{
     id: string;
@@ -442,12 +472,14 @@ export async function getVendorConcentration(
     WITH vendor_spend AS (
       SELECT
         cv.vendor_id,
-        cv.vendor_name,
-        SUM(c.amount_ht) AS spend
+        COALESCE(v.name, cv.vendor_id) AS vendor_name,
+        SUM(c.amount_ht) AS spend,
+        COUNT(DISTINCT c.uid) AS cnt
       FROM france_contracts c
       JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
-      ${conditions}
-      GROUP BY cv.vendor_id, cv.vendor_name
+      LEFT JOIN france_vendors v ON v.id = cv.vendor_id
+      ${where}
+      GROUP BY cv.vendor_id, v.name
     ),
     total AS (
       SELECT SUM(spend) AS grand_total FROM vendor_spend
@@ -456,11 +488,7 @@ export async function getVendorConcentration(
       vs.vendor_id                                                         AS id,
       vs.vendor_name                                                       AS name,
       COALESCE(vs.spend, 0)::text                                          AS total_amount,
-      (
-        SELECT COUNT(*)::text
-        FROM france_contract_vendors cv2
-        WHERE cv2.vendor_id = vs.vendor_id
-      )                                                                    AS contract_count,
+      vs.cnt::text                                                         AS contract_count,
       ROUND(COALESCE(vs.spend, 0) / NULLIF((SELECT grand_total FROM total), 0) * 100, 2)::text
                                                                            AS market_share
     FROM vendor_spend vs
@@ -503,21 +531,23 @@ export async function getAmendmentInflation(minPctIncrease = 50): Promise<
     SELECT
       c.uid                                                        AS contract_uid,
       c.object,
-      c.buyer_name,
+      COALESCE(c.buyer_name, c.buyer_siret)                        AS buyer_name,
       c.amount_ht::text                                            AS original_amount,
       MAX(m.new_amount_ht)::text                                   AS final_amount,
       ROUND(
         (MAX(m.new_amount_ht) - c.amount_ht) / NULLIF(c.amount_ht, 0) * 100,
-        2
+        1
       )::text                                                      AS pct_increase,
       COUNT(m.id)::text                                            AS modification_count
     FROM france_contracts c
     JOIN france_modifications m ON m.contract_uid = c.uid
     WHERE m.new_amount_ht IS NOT NULL
-    GROUP BY c.uid, c.object, c.buyer_name, c.amount_ht
+      AND c.amount_ht > 0 AND ${SANE_AMOUNT}
+      AND m.new_amount_ht < 10000000000
+    GROUP BY c.uid, c.object, c.buyer_name, c.buyer_siret, c.amount_ht
     HAVING
       (MAX(m.new_amount_ht) - c.amount_ht) / NULLIF(c.amount_ht, 0) * 100 >= $1
-    ORDER BY pct_increase DESC
+    ORDER BY (MAX(m.new_amount_ht) - c.amount_ht) DESC
     LIMIT 100
     `,
     [minPctIncrease]
@@ -553,11 +583,11 @@ export async function getCompetitionByYear(): Promise<
     SELECT
       EXTRACT(YEAR FROM notification_date)::text  AS year,
       COALESCE(procedure, 'Non renseigné')        AS procedure,
-      COALESCE(SUM(amount_ht), 0)::text           AS total_amount,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                              AS contract_count,
-      COALESCE(AVG(NULLIF(bids_received, 0)), 0)::text AS avg_bids
+      ROUND(COALESCE(AVG(NULLIF(bids_received, 0)) FILTER (WHERE ${SANE_BIDS}), 0), 1)::text AS avg_bids
     FROM france_contracts
-    WHERE notification_date IS NOT NULL
+    WHERE notification_date IS NOT NULL AND ${SANE_DATE}
     GROUP BY EXTRACT(YEAR FROM notification_date), procedure
     ORDER BY year, procedure
   `);
