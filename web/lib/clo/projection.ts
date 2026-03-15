@@ -1,6 +1,13 @@
 // Pure deterministic CLO waterfall projection engine — no React, no DOM.
 // Runs entirely client-side for instant recalculation.
 
+export interface LoanInput {
+  parBalance: number;
+  maturityDate: string;
+  ratingBucket: string;
+  spreadBps: number;
+}
+
 export interface ProjectionInputs {
   initialPar: number;
   wacSpreadBps: number;
@@ -19,12 +26,12 @@ export interface ProjectionInputs {
   reinvestmentPeriodEnd: string | null;
   maturityDate: string | null;
   currentDate: string;
-  cdrPct: number;
+  loans: LoanInput[];
+  defaultRatesByRating: Record<string, number>;
   cprPct: number;
   recoveryPct: number;
   recoveryLagMonths: number;
   reinvestmentSpreadBps: number;
-  maturitySchedule: { parBalance: number; maturityDate: string }[];
 }
 
 export interface PeriodResult {
@@ -45,6 +52,7 @@ export interface PeriodResult {
   ocTests: { className: string; actual: number; trigger: number; passing: boolean }[];
   icTests: { className: string; actual: number; trigger: number; passing: boolean }[];
   equityDistribution: number;
+  defaultsByRating: Record<string, number>;
 }
 
 export interface ProjectionResult {
@@ -100,53 +108,65 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     initialPar, wacSpreadBps, baseRatePct, seniorFeePct,
     tranches, ocTriggers, icTriggers,
     reinvestmentPeriodEnd, maturityDate, currentDate,
-    cdrPct, cprPct, recoveryPct, recoveryLagMonths, reinvestmentSpreadBps,
-    maturitySchedule,
+    loans, defaultRatesByRating, cprPct, recoveryPct, recoveryLagMonths, reinvestmentSpreadBps,
   } = inputs;
 
   const totalQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : 40;
   const recoveryLagQ = Math.max(0, Math.round(recoveryLagMonths / 3));
 
-  // Annual rates → quarterly via deannualization (clamp to [0, 99.99] to avoid NaN)
-  const clampedCdr = Math.max(0, Math.min(cdrPct, 99.99));
+  // Pre-compute quarterly hazard rates per rating bucket
+  const quarterlyHazard: Record<string, number> = {};
+  for (const [rating, annualCDR] of Object.entries(defaultRatesByRating)) {
+    const clamped = Math.max(0, Math.min(annualCDR, 99.99));
+    quarterlyHazard[rating] = 1 - Math.pow(1 - clamped / 100, 0.25);
+  }
+
+  // Quarterly prepay rate
   const clampedCpr = Math.max(0, Math.min(cprPct, 99.99));
-  const qDefaultRate = 1 - Math.pow(1 - clampedCdr / 100, 0.25);
   const qPrepayRate = 1 - Math.pow(1 - clampedCpr / 100, 0.25);
+
+  // Internal per-loan state
+  interface LoanState {
+    survivingPar: number;
+    maturityQuarter: number;
+    ratingBucket: string;
+    spreadBps: number;
+  }
+
+  const rpEndQuarter = reinvestmentPeriodEnd
+    ? Math.min(Math.max(1, quartersBetween(currentDate, reinvestmentPeriodEnd)), totalQuarters)
+    : 0;
+
+  const loanStates: LoanState[] = loans.map((l) => ({
+    survivingPar: l.parBalance,
+    maturityQuarter: Math.max(1, Math.min(quartersBetween(currentDate, l.maturityDate), totalQuarters)),
+    ratingBucket: l.ratingBucket,
+    spreadBps: l.spreadBps,
+  }));
+
+  const hasLoans = loanStates.length > 0;
 
   // Track tranche balances (debt outstanding per tranche)
   const trancheBalances: Record<string, number> = {};
   const sortedTranches = [...tranches].sort((a, b) => a.seniorityRank - b.seniorityRank);
-  // Debt tranches only (no income notes) sorted by seniority for waterfall priority
   const debtTranches = sortedTranches.filter((t) => !t.isIncomeNote);
   for (const t of sortedTranches) {
     trancheBalances[t.className] = t.currentBalance;
   }
 
-  // OC/IC triggers already have rank resolved by the caller (ProjectionModel)
   const ocTriggersByClass = ocTriggers;
   const icTriggersByClass = icTriggers;
 
   // Recovery pipeline: future cash from defaulted assets
   const recoveryPipeline: { quarter: number; amount: number }[] = [];
 
-  let currentPar = initialPar; // performing collateral par
-  let currentWacSpreadBps = wacSpreadBps;
+  let currentPar = initialPar;
   const periods: PeriodResult[] = [];
   const equityCashFlows: number[] = [];
-
-  // Pre-bucket maturity schedule into quarterly amounts
-  const maturityByQuarter = new Map<number, number>();
-  for (const loan of maturitySchedule) {
-    if (!loan.maturityDate || !loan.parBalance) continue;
-    const q = quartersBetween(currentDate, loan.maturityDate);
-    if (q < 1 || q > totalQuarters) continue;
-    maturityByQuarter.set(q, (maturityByQuarter.get(q) ?? 0) + loan.parBalance);
-  }
 
   const tranchePayoffQuarter: Record<string, number | null> = {};
   let totalEquityDistributions = 0;
 
-  // Initial equity investment (negative cash flow for IRR)
   const totalDebtOutstanding = debtTranches.reduce((s, t) => s + t.currentBalance, 0);
   const equityInvestment = Math.max(0, initialPar - totalDebtOutstanding);
   equityCashFlows.push(-equityInvestment);
@@ -160,66 +180,119 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
   for (let q = 1; q <= totalQuarters; q++) {
     const periodDate = addQuarters(currentDate, q);
     const inRP = rpEndDate ? new Date(periodDate) <= rpEndDate : false;
-    const beginningPar = currentPar;
+    const isMaturity = q === totalQuarters;
+
+    // ── 1. Beginning par ──────────────────────────────────────────
+    const beginningPar = hasLoans
+      ? loanStates.reduce((s, l) => s + l.survivingPar, 0)
+      : currentPar;
     const beginningLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
 
-    // ── 1. Defaults ──────────────────────────────────────────────
-    // Remove defaulted par from performing pool
-    const defaults = currentPar * qDefaultRate;
-    currentPar -= defaults;
+    // Save per-loan beginning par for interest calc
+    const loanBeginningPar = hasLoans ? loanStates.map((l) => l.survivingPar) : [];
 
-    // Queue recovery cash to arrive after the lag period
-    if (defaults > 0 && recoveryPct > 0) {
-      recoveryPipeline.push({ quarter: q + recoveryLagQ, amount: defaults * (recoveryPct / 100) });
-    }
+    // ── 2. Per-loan defaults ────────────────────────────────────────
+    let totalDefaults = 0;
+    const defaultsByRating: Record<string, number> = {};
 
-    // ── 2. Prepayments ──────────────────────────────────────────
-    // Prepaying loans leave the performing pool; cash goes to principal waterfall
-    const prepayments = currentPar * qPrepayRate;
-    currentPar -= prepayments;
-
-    // ── 2b. Scheduled Maturities ─────────────────────────────────
-    // Loans reaching their contractual maturity date return par.
-    // Cap at remaining par to avoid double-counting with defaults/prepayments.
-    const rawMaturityAmount = maturityByQuarter.get(q) ?? 0;
-    const scheduledMaturities = Math.min(rawMaturityAmount, currentPar);
-    currentPar -= scheduledMaturities;
-
-    // ── 3. Recoveries ───────────────────────────────────────────
-    // Recovery cash from prior defaults. This is CASH, not a restoration of par.
-    // It flows to the principal waterfall as available proceeds.
-    // At maturity, collect ALL pending pipeline recoveries (accelerated settlement).
-    const isMaturity = q === totalQuarters;
-    const recoveries = isMaturity
-      ? recoveryPipeline.filter((r) => r.quarter >= q).reduce((s, r) => s + r.amount, 0)
-      : recoveryPipeline.filter((r) => r.quarter === q).reduce((s, r) => s + r.amount, 0);
-    // NOTE: recoveries do NOT add to currentPar — par was permanently reduced by the default.
-
-    // ── 4. Interest collection ─────────────────────────────────
-    // Interest accrues on beginning-of-period par at the pre-reinvestment WAC.
-    // This must happen BEFORE reinvestment blends the WAC for next period.
-    const allInRate = (baseRatePct + currentWacSpreadBps / 100) / 100;
-    const interestCollected = beginningPar * allInRate / 4;
-
-    // ── 5. Reinvestment ─────────────────────────────────────────
-    // During the RP, reinvest prepayment + recovery cash into new assets
-    let reinvestment = 0;
-    if (inRP) {
-      reinvestment = prepayments + scheduledMaturities + recoveries;
-      currentPar += reinvestment;
-      // Blend WAC toward reinvestment spread for newly purchased assets
-      if (currentPar > 0) {
-        const existingWeight = (currentPar - reinvestment) / currentPar;
-        const newWeight = reinvestment / currentPar;
-        currentWacSpreadBps = existingWeight * currentWacSpreadBps + newWeight * reinvestmentSpreadBps;
+    if (hasLoans) {
+      for (const loan of loanStates) {
+        const hazard = quarterlyHazard[loan.ratingBucket] ?? 0;
+        const loanDefaults = loan.survivingPar * hazard;
+        loan.survivingPar -= loanDefaults;
+        totalDefaults += loanDefaults;
+        if (loanDefaults > 0) {
+          defaultsByRating[loan.ratingBucket] = (defaultsByRating[loan.ratingBucket] ?? 0) + loanDefaults;
+        }
       }
     }
 
-    let endingPar = currentPar;
+    if (totalDefaults > 0 && recoveryPct > 0) {
+      recoveryPipeline.push({ quarter: q + recoveryLagQ, amount: totalDefaults * (recoveryPct / 100) });
+    }
 
-    // ── 6. Compute OC & IC ratios ───────────────────────────────
-    // OC = performing par / debt outstanding (at or above the tested class)
-    // IC = interest available (after senior fees) / interest due on debt at-and-above
+    // ── 3. Per-loan maturities ──────────────────────────────────────
+    let totalMaturities = 0;
+    if (hasLoans) {
+      for (const loan of loanStates) {
+        if (q === loan.maturityQuarter) {
+          totalMaturities += loan.survivingPar;
+          loan.survivingPar = 0;
+        }
+      }
+    }
+
+    // ── 4. Per-loan prepayments ─────────────────────────────────────
+    let totalPrepayments = 0;
+    if (hasLoans) {
+      for (const loan of loanStates) {
+        if (loan.survivingPar > 0) {
+          const prepay = loan.survivingPar * qPrepayRate;
+          loan.survivingPar -= prepay;
+          totalPrepayments += prepay;
+        }
+      }
+    }
+
+    // ── Aggregate ──────────────────────────────────────────────────
+    const defaults = hasLoans ? totalDefaults : currentPar * 0;
+    const scheduledMaturities = totalMaturities;
+    const prepayments = hasLoans ? totalPrepayments : 0;
+
+    if (!hasLoans) {
+      // Fallback: no per-loan tracking, just keep currentPar stable (no defaults/prepay/maturity)
+    }
+
+    // ── 5. Recoveries ───────────────────────────────────────────
+    const recoveries = isMaturity
+      ? recoveryPipeline.filter((r) => r.quarter >= q).reduce((s, r) => s + r.amount, 0)
+      : recoveryPipeline.filter((r) => r.quarter === q).reduce((s, r) => s + r.amount, 0);
+
+    // ── 6. Interest collection ─────────────────────────────────
+    let interestCollected: number;
+    if (hasLoans) {
+      interestCollected = 0;
+      for (let i = 0; i < loanStates.length; i++) {
+        const loan = loanStates[i];
+        const loanBegPar = loanBeginningPar[i];
+        interestCollected += loanBegPar * (baseRatePct + loan.spreadBps / 100) / 100 / 4;
+      }
+    } else {
+      const allInRate = (baseRatePct + wacSpreadBps / 100) / 100;
+      interestCollected = beginningPar * allInRate / 4;
+    }
+
+    // ── 7. Reinvestment ─────────────────────────────────────────
+    let reinvestment = 0;
+    if (inRP) {
+      reinvestment = prepayments + scheduledMaturities + recoveries;
+      if (hasLoans && reinvestment > 0) {
+        loanStates.push({
+          survivingPar: reinvestment,
+          ratingBucket: "NR",
+          spreadBps: reinvestmentSpreadBps,
+          maturityQuarter: Math.min(rpEndQuarter, totalQuarters),
+        });
+      }
+    }
+
+    // Update currentPar from loan states or fallback
+    if (hasLoans) {
+      currentPar = loanStates.reduce((s, l) => s + l.survivingPar, 0);
+      if (inRP) {
+        // currentPar already includes reinvested loans
+      }
+    } else {
+      if (inRP) {
+        currentPar += reinvestment;
+      }
+    }
+
+    let endingPar = hasLoans
+      ? loanStates.reduce((s, l) => s + l.survivingPar, 0)
+      : currentPar;
+
+    // ── 8. Compute OC & IC ratios ───────────────────────────────
     const seniorFeeAmount = beginningPar * (seniorFeePct / 100) / 4;
     const interestAfterFees = Math.max(0, interestCollected - seniorFeeAmount);
 
@@ -244,7 +317,6 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       icResults.push({ className: ic.className, actual, trigger: ic.triggerLevel, passing });
     }
 
-    // Build a set of failing test seniority ranks for waterfall gating
     const failingOcRanks = new Set(
       ocTriggersByClass
         .filter((oc) => ocResults.some((r) => r.className === oc.className && !r.passing))
@@ -256,22 +328,16 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
         .map((ic) => ic.rank)
     );
 
-    // ── 7. Interest waterfall (OC/IC-gated) ─────────────────────
-    // In a real CLO: pay senior interest → check OC/IC at that level → if fail,
-    // divert remaining interest to principal before paying junior tranches.
+    // ── 9. Interest waterfall (OC/IC-gated) ─────────────────────
     let availableInterest = interestCollected;
     const trancheInterest: PeriodResult["trancheInterest"] = [];
     let diversionToPaydown = 0;
 
-    // Senior fees first (trustee, admin, collateral manager senior fee)
     availableInterest -= Math.min(seniorFeeAmount, availableInterest);
 
-    // Walk through debt tranches by seniority. After paying each tranche's interest,
-    // check if any OC/IC test at that seniority level is failing.
     let diverted = false;
     for (const t of debtTranches) {
       if (diverted) {
-        // Once diverted, no more interest to junior tranches
         const rate = trancheCouponRate(t, baseRatePct);
         const due = trancheBalances[t.className] * rate / 4;
         trancheInterest.push({ className: t.className, due, paid: 0 });
@@ -284,7 +350,6 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       availableInterest -= paid;
       trancheInterest.push({ className: t.className, due, paid });
 
-      // Check if any OC/IC test at this tranche's seniority rank is failing
       if (failingOcRanks.has(t.seniorityRank) || failingIcRanks.has(t.seniorityRank)) {
         diversionToPaydown += availableInterest;
         availableInterest = 0;
@@ -292,19 +357,19 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       }
     }
 
-    // Equity residual from interest (only if no diversion consumed everything)
     const equityFromInterest = availableInterest;
 
-    // ── 8. Principal waterfall ──────────────────────────────────
-    // Principal proceeds = all principal cash sources minus what was reinvested.
-    // During RP: reinvestment = prepayments + recoveries, so net = 0 + diversion.
-    // Post-RP:   reinvestment = 0, so net = prepayments + recoveries + diversion.
-    // At maturity (final quarter): remaining collateral is liquidated at par.
+    // ── 10. Principal waterfall ──────────────────────────────────
     const liquidationProceeds = isMaturity ? endingPar : 0;
     let availablePrincipal = prepayments + scheduledMaturities + recoveries - reinvestment + diversionToPaydown + liquidationProceeds;
     if (availablePrincipal < 0) availablePrincipal = 0;
-    // If liquidating, the par is consumed
     if (isMaturity) {
+      // Liquidate all loans
+      if (hasLoans) {
+        for (const loan of loanStates) {
+          loan.survivingPar = 0;
+        }
+      }
       currentPar = 0;
       endingPar = 0;
     }
@@ -327,7 +392,6 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
 
     const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
 
-    // Remaining principal cash + interest residual → equity
     const equityDistribution = equityFromInterest + availablePrincipal;
     totalEquityDistributions += equityDistribution;
     equityCashFlows.push(equityDistribution);
@@ -350,6 +414,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       ocTests: ocResults,
       icTests: icResults,
       equityDistribution,
+      defaultsByRating,
     });
 
     // Stop early if all debt paid off and collateral is depleted
