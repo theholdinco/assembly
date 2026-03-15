@@ -1,11 +1,13 @@
 import { Pool, PoolClient } from "pg";
 import { createHash } from "crypto";
-import { createWriteStream, unlinkSync, statSync, readFileSync } from "fs";
+import { createWriteStream, unlinkSync, statSync, readFileSync, createReadStream } from "fs";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { DecpContract, DecpTitulaire, DecpModification } from "./types";
+
+const { chain } = require("stream-chain");
 
 const DATA_URLS: Record<string, string> = {
   "2019": "https://static.data.gouv.fr/resources/donnees-essentielles-de-la-commande-publique-fichiers-consolides/20260315-031537/decp-2019.json",
@@ -466,39 +468,105 @@ export async function downloadJson(url: string, year: string): Promise<string> {
   return dest;
 }
 
+const MAX_READFILE_SIZE = 400 * 1024 * 1024; // 400MB — safe for readFileSync
+
+async function parseContractsSmall(filePath: string): Promise<DecpContract[]> {
+  const raw = readFileSync(filePath, "utf-8");
+  const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed.marches)) return parsed.marches;
+  if (parsed.marches?.marche) {
+    return [
+      ...(parsed.marches.marche || []),
+      ...(parsed.marches["contrat-concession"] || []),
+    ];
+  }
+  return [];
+}
+
+async function streamParseContracts(
+  filePath: string,
+  onBatch: (batch: DecpContract[]) => Promise<void>
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const { parser } = require("stream-json");
+    const { pick } = require("stream-json/filters/Pick");
+    const { streamValues } = require("stream-json/streamers/StreamValues");
+
+    let total = 0;
+    let batch: DecpContract[] = [];
+
+    // Match contract arrays in both JSON formats:
+    // { marches: [...] } and { marches: { marche: [...], "contrat-concession": [...] } }
+    const fileStream = createReadStream(filePath);
+    const jsonPipeline = chain([
+      fileStream,
+      parser(),
+      pick({ filter: /^marches\.marche\.\d+$|^marches\.\d+$|^marches\.contrat-concession\.\d+$/ }),
+      streamValues(),
+    ]);
+
+    jsonPipeline.on("data", ({ value }: { value: DecpContract }) => {
+      batch.push(value);
+      total++;
+      if (batch.length >= BATCH_SIZE) {
+        const current = batch;
+        batch = [];
+        jsonPipeline.pause();
+        onBatch(current)
+          .then(() => jsonPipeline.resume())
+          .catch(reject);
+      }
+    });
+
+    jsonPipeline.on("end", async () => {
+      if (batch.length > 0) {
+        await onBatch(batch);
+      }
+      resolve(total);
+    });
+
+    jsonPipeline.on("error", reject);
+  });
+}
+
 export async function ingestJsonFile(
   pool: Pool,
   filePath: string,
   stats: IngestStats
 ): Promise<void> {
-  const raw = readFileSync(filePath, "utf-8");
-  const parsed = JSON.parse(raw);
-
-  let contracts: DecpContract[] = [];
-  if (Array.isArray(parsed.marches)) {
-    contracts = parsed.marches;
-  } else if (parsed.marches?.marche) {
-    contracts = [
-      ...(parsed.marches.marche || []),
-      ...(parsed.marches["contrat-concession"] || []),
-    ];
-  }
-
-  console.log(`  Found ${contracts.length} contracts`);
-
+  const fileSize = statSync(filePath).size;
   const client = await pool.connect();
-  try {
-    for (let i = 0; i < contracts.length; i += BATCH_SIZE) {
-      const batch = contracts.slice(i, i + BATCH_SIZE);
-      await client.query("BEGIN");
-      await processBatch(client, batch, stats);
-      await client.query("COMMIT");
 
-      const processed = Math.min(i + BATCH_SIZE, contracts.length);
-      console.log(`  Processed ${processed}/${contracts.length} contracts...`);
+  try {
+    if (fileSize < MAX_READFILE_SIZE) {
+      // Small file: read all at once
+      const contracts = await parseContractsSmall(filePath);
+      console.log(`  Found ${contracts.length} contracts`);
+
+      for (let i = 0; i < contracts.length; i += BATCH_SIZE) {
+        const batch = contracts.slice(i, i + BATCH_SIZE);
+        await client.query("BEGIN");
+        await processBatch(client, batch, stats);
+        await client.query("COMMIT");
+
+        const processed = Math.min(i + BATCH_SIZE, contracts.length);
+        console.log(`  Processed ${processed}/${contracts.length} contracts...`);
+      }
+    } else {
+      // Large file: stream parse
+      console.log(`  Large file (${(fileSize / 1024 / 1024).toFixed(0)} MB), streaming...`);
+      let processed = 0;
+
+      await streamParseContracts(filePath, async (batch) => {
+        await client.query("BEGIN");
+        await processBatch(client, batch, stats);
+        await client.query("COMMIT");
+        processed += batch.length;
+        console.log(`  Processed ${processed} contracts...`);
+      });
     }
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
