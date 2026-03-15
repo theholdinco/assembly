@@ -33,44 +33,13 @@ interface UpdateCheck {
   contentLength: number | null;
 }
 
-function sourceHash(contractUid: string, mod: DecpModification): string {
-  const input = [
-    contractUid,
-    mod.objetModification,
-    mod.montant,
-    mod.dureeMois,
-    mod.datePublicationDonneesModification,
-  ].join("|");
-  return createHash("sha256").update(input).digest("hex").slice(0, 16);
-}
-
-function extractBuyerId(c: DecpContract): string | null {
-  const id = c.acheteur?.id || c["acheteur.id"] || null;
-  return id ? String(id) : null;
-}
-
-function extractBuyerName(c: DecpContract): string | null {
-  return str(c.acheteur?.nom);
-}
-
-function extractTitulaires(c: DecpContract): DecpTitulaire[] {
-  if (!Array.isArray(c.titulaires)) return [];
-  return c.titulaires.map((t) => {
-    if (t && typeof t === "object" && "titulaire" in t && t.titulaire) return t.titulaire as DecpTitulaire;
-    return t as DecpTitulaire;
-  });
-}
-
-function extractModifications(c: DecpContract): DecpModification[] {
-  if (!Array.isArray(c.modifications)) return [];
-  return c.modifications.map((m) => {
-    if (m && typeof m === "object" && "modification" in m && m.modification) return m.modification as DecpModification;
-    return m as DecpModification;
-  });
-}
+// ── Safe value extractors ──
+// DECP JSON has zero type guarantees. Any field can be any type.
+// Every value from the JSON must go through one of these before hitting SQL.
 
 function str(v: unknown): string | null {
   if (v == null || v === "") return null;
+  if (typeof v === "object") return null; // reject objects/arrays
   return String(v);
 }
 
@@ -86,15 +55,74 @@ function safeInt(v: unknown, max: number): number | null {
   return n;
 }
 
-// Validate date-like strings — reject garbage that would crash PostgreSQL's ::date cast
+const DATE_RE = /^(\d{4}-\d{2}-\d{2})/;
 function safeDate(v: unknown): string | null {
   const s = str(v);
   if (!s) return null;
-  // Must look like YYYY-MM-DD (possibly with time after)
-  if (!/^\d{4}-\d{2}/.test(s)) return null;
-  const year = parseInt(s.slice(0, 4), 10);
+  const m = DATE_RE.exec(s);
+  if (!m) return null;
+  const dateStr = m[1]; // extract ONLY YYYY-MM-DD, discard any trailing garbage
+  const year = parseInt(dateStr.slice(0, 4), 10);
   if (year < 1990 || year > 2099) return null;
-  return s;
+  return dateStr;
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+// ── Domain extractors ──
+
+function sourceHash(contractUid: string, mod: DecpModification): string {
+  const input = [
+    contractUid,
+    str(mod.objetModification) ?? "",
+    str(mod.montant) ?? "",
+    str(mod.dureeMois) ?? "",
+    str(mod.datePublicationDonneesModification) ?? "",
+  ].join("|");
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
+}
+
+function extractBuyerId(c: DecpContract): string | null {
+  const id = c.acheteur?.id || c["acheteur.id"] || null;
+  return id ? String(id) : null;
+}
+
+function extractBuyerName(c: DecpContract): string | null {
+  return str(c.acheteur?.nom);
+}
+
+function unwrapTitulaire(t: unknown): DecpTitulaire | null {
+  if (!isObj(t)) return null;
+  if ("titulaire" in t && isObj(t.titulaire)) return t.titulaire as DecpTitulaire;
+  return t as DecpTitulaire;
+}
+
+function extractTitulaires(c: DecpContract): DecpTitulaire[] {
+  if (!Array.isArray(c.titulaires)) return [];
+  const out: DecpTitulaire[] = [];
+  for (const t of c.titulaires) {
+    const tit = unwrapTitulaire(t);
+    if (tit) out.push(tit);
+  }
+  return out;
+}
+
+function unwrapModification(m: unknown): DecpModification | null {
+  if (!isObj(m)) return null;
+  if ("modification" in m && isObj(m.modification)) return m.modification as DecpModification;
+  return m as DecpModification;
+}
+
+function extractModifications(c: DecpContract): DecpModification[] {
+  if (!Array.isArray(c.modifications)) return [];
+  const out: DecpModification[] = [];
+  for (const m of c.modifications) {
+    const mod = unwrapModification(m);
+    if (mod) out.push(mod);
+  }
+  return out;
 }
 
 function contractUid(c: DecpContract): string {
@@ -404,7 +432,8 @@ async function processBatch(
   }> = [];
 
   for (const c of contracts) {
-    if (!c.id) continue;
+    if (!c.id || !isObj(c)) continue;
+    try {
     stats.rowsProcessed++;
 
     const uid = contractUid(c);
@@ -429,12 +458,13 @@ async function processBatch(
 
     // Collect modifications
     for (const mod of extractModifications(c)) {
-      const modTitulaires = Array.isArray(mod.titulaires)
-        ? mod.titulaires.map((t) => {
-            if ("titulaire" in t && t.titulaire) return t.titulaire as DecpTitulaire;
-            return t as DecpTitulaire;
-          })
-        : [];
+      const modTitulaires: DecpTitulaire[] = [];
+      if (Array.isArray(mod.titulaires)) {
+        for (const t of mod.titulaires) {
+          const tit = unwrapTitulaire(t);
+          if (tit) modTitulaires.push(tit);
+        }
+      }
       const firstTit = modTitulaires[0];
 
       modRows.push({
@@ -447,6 +477,10 @@ async function processBatch(
         pubDate: safeDate(mod.datePublicationDonneesModification),
         hash: sourceHash(uid, mod),
       });
+    }
+    } catch (e) {
+      // Skip bad records rather than crash the entire ingestion
+      console.warn(`[ingest] Skipping bad contract ${str(c.id)}: ${e}`);
     }
   }
 
