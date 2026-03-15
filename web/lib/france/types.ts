@@ -1,29 +1,49 @@
-// --- Raw Parquet row ---
+// --- Raw JSON contract from DECP ---
 
-export interface DecpParquetRow {
-  uid: string;
+export interface DecpTitulaire {
+  typeIdentifiant?: string;
+  id?: string;
+  denominationSociale?: string;
+}
+
+export interface DecpModification {
+  id?: number;
+  objetModification?: string;
+  dateNotificationModification?: string;
+  datePublicationDonneesModification?: string;
+  montant?: number;
+  dureeMois?: number;
+  titulaires?: Array<{ titulaire?: DecpTitulaire } | DecpTitulaire>;
+}
+
+export interface DecpContract {
+  uid?: string;
   id: string;
-  acheteur_id: string;
-  acheteur_nom: string;
-  titulaire_id: string;
-  titulaire_typeIdentifiant: string;
-  titulaire_denominationSociale: string;
-  nature: string;
-  objet: string;
-  codeCPV: string;
-  procedure: string;
-  montant: number;
-  dureeMois: number;
-  dateNotification: string;
-  datePublicationDonnees: string;
-  lieuExecution_code: string;
-  lieuExecution_nom: string;
-  offresRecues: number;
-  formePrix: string;
-  idAccordCadre: string;
-  donneesActuelles: boolean;
-  anomalies: string;
-  objetModification: string;
+  nature?: string;
+  objet?: string;
+  codeCPV?: string;
+  procedure?: string;
+  montant?: number;
+  dureeMois?: number;
+  dateNotification?: string;
+  datePublicationDonnees?: string;
+  formePrix?: string;
+  offresRecues?: number;
+  source?: string;
+  // Buyer — nested or flat depending on schema version
+  acheteur?: { id?: string; nom?: string };
+  "acheteur.id"?: string;
+  // Titulaires — nested or flat depending on schema version
+  titulaires?: Array<{ titulaire?: DecpTitulaire } | DecpTitulaire>;
+  titulaire_id?: string;
+  titulaire_typeIdentifiant?: string;
+  titulaire_denominationSociale?: string;
+  // Location — nested or flat
+  lieuExecution?: { code?: string; typeCode?: string; nom?: string };
+  lieuExecution_code?: string;
+  lieuExecution_nom?: string;
+  // Modifications
+  modifications?: Array<{ modification?: DecpModification } | DecpModification>;
 }
 
 // --- Database row types ---

@@ -3,12 +3,12 @@
 CREATE TABLE IF NOT EXISTS france_contracts (
   uid                TEXT PRIMARY KEY,
   market_id          TEXT,
-  buyer_siret        CHAR(14),
+  buyer_siret        TEXT,
   buyer_name         TEXT,
   nature             TEXT,
   object             TEXT,
   cpv_code           TEXT,
-  cpv_division       CHAR(2),
+  cpv_division       TEXT,
   procedure          TEXT,
   amount_ht          NUMERIC(18,2),
   duration_months    INTEGER,
@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS france_vendors (
   id               TEXT PRIMARY KEY,
   id_type          TEXT,
   name             TEXT,
-  siret            CHAR(14),
-  siren            CHAR(9),
+  siret            TEXT,
+  siren            TEXT,
   contract_count   INTEGER DEFAULT 0,
   total_amount_ht  NUMERIC(18,2) DEFAULT 0,
   first_seen       DATE,
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS france_vendors (
 );
 
 CREATE TABLE IF NOT EXISTS france_buyers (
-  siret            CHAR(14) PRIMARY KEY,
+  siret            TEXT PRIMARY KEY,
   name             TEXT,
   contract_count   INTEGER DEFAULT 0,
   total_amount_ht  NUMERIC(18,2) DEFAULT 0,
