@@ -727,9 +727,12 @@ export async function getLowestCompetitionBuyers(
     WHERE c.buyer_siret IS NOT NULL
     GROUP BY c.buyer_siret, b.name
     HAVING COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}) >= 10
+      AND COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0) > 1000000
     ORDER BY
-      COUNT(*) FILTER (WHERE c.bids_received = 1)::numeric /
-      NULLIF(COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}), 0) DESC NULLS LAST
+      (COUNT(*) FILTER (WHERE c.bids_received = 1)::numeric /
+       NULLIF(COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}), 0))
+      * LN(GREATEST(COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0), 1))
+      DESC NULLS LAST
     LIMIT $1
     `,
     [limit]
