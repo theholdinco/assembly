@@ -7,6 +7,8 @@ import {
 } from "@/lib/france/queries";
 import { formatEuro } from "@/lib/france/format";
 
+export const dynamic = "force-dynamic";
+
 export default async function FranceFlagsPage() {
   const [stats, lowestCompetition, topNoComp, worstInflations] =
     await Promise.all([

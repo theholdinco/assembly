@@ -6,6 +6,8 @@ import {
   getTopVendors,
   getProcedureBreakdown,
 } from "@/lib/france/queries";
+
+export const dynamic = "force-dynamic";
 import {
   SpendByYearChart,
   ProcedureBreakdownChart,

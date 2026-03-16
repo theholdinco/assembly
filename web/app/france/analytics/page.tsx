@@ -4,6 +4,8 @@ import {
   getAmendmentInflation,
   getCompetitionByYear,
 } from "@/lib/france/queries";
+
+export const dynamic = "force-dynamic";
 import { formatEuro } from "@/lib/france/format";
 
 type View = "concentration" | "amendments" | "competition";
