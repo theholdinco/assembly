@@ -360,13 +360,14 @@ export async function getVendorTopBuyers(
     `
     SELECT
       c.buyer_siret                     AS siret,
-      COALESCE(c.buyer_name, c.buyer_siret) AS name,
+      COALESCE(b.name, c.buyer_name, c.buyer_siret) AS name,
       COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                    AS contract_count
     FROM france_contracts c
     JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
+    LEFT JOIN france_buyers b ON b.siret = c.buyer_siret
     WHERE cv.vendor_id = $1
-    GROUP BY c.buyer_siret, c.buyer_name
+    GROUP BY c.buyer_siret, b.name, c.buyer_name
     ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $2
     `,
@@ -418,13 +419,14 @@ export async function getBuyerTopVendors(
     `
     SELECT
       cv.vendor_id                        AS id,
-      COALESCE(cv.vendor_name, cv.vendor_id) AS name,
+      COALESCE(v.name, cv.vendor_name, cv.vendor_id) AS name,
       COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_amount,
       COUNT(*)::text                      AS contract_count
     FROM france_contracts c
     JOIN france_contract_vendors cv ON cv.contract_uid = c.uid
+    LEFT JOIN france_vendors v ON v.id = cv.vendor_id
     WHERE c.buyer_siret = $1
-    GROUP BY cv.vendor_id, cv.vendor_name
+    GROUP BY cv.vendor_id, v.name, cv.vendor_name
     ORDER BY SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END) DESC NULLS LAST
     LIMIT $2
     `,
@@ -898,11 +900,12 @@ export async function getVendorFlags(vendorId: string): Promise<VendorFlags> {
     ),
     buyer_conc AS (
       SELECT
-        COALESCE(vc.buyer_name, vc.buyer_siret) AS name,
+        COALESCE(b.name, vc.buyer_name, vc.buyer_siret) AS name,
         SUM(vc.amount_ht) AS buyer_spend,
         SUM(SUM(vc.amount_ht)) OVER () AS total_spend
       FROM vendor_contracts vc
-      GROUP BY COALESCE(vc.buyer_name, vc.buyer_siret)
+      LEFT JOIN france_buyers b ON b.siret = vc.buyer_siret
+      GROUP BY COALESCE(b.name, vc.buyer_name, vc.buyer_siret)
       ORDER BY SUM(vc.amount_ht) DESC
       LIMIT 1
     ),
