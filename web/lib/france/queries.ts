@@ -26,9 +26,9 @@ const SANE_BIDS = "bids_received < 1000";
 const NO_COMP_FILTER = "(procedure ILIKE '%sans%concurrence%' OR procedure ILIKE '%sans publicite%' OR procedure ILIKE '%negocie sans%')";
 const MAX_PLAUSIBLE_INFLATION_PCT = 100_000;
 
-// Simple in-memory cache for expensive aggregate queries.
-// Data changes only on ingestion (daily at most), so 10min TTL is fine.
-const CACHE_TTL_MS = 10 * 60 * 1000;
+// In-memory cache for expensive aggregate queries.
+// Data changes only on ingestion (daily at most), so 12hr TTL is safe.
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const cache = new Map<string, { data: unknown; expires: number }>();
 
 function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -38,6 +38,27 @@ function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
     cache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
     return data;
   });
+}
+
+// Pre-warm cache on server startup so first visitor gets instant results.
+let warmed = false;
+export function warmCache(): Promise<void> {
+  if (warmed) return Promise.resolve();
+  warmed = true;
+  // Fire-and-forget — don't block the caller
+  Promise.all([
+    getDashboardSummary(),
+    getSpendByYear(),
+    getTopBuyers(),
+    getTopVendors(),
+    getProcedureBreakdown(),
+    getFlagStats(),
+    getLowestCompetitionBuyers(10),
+    getTopNoCompetitionSpenders(10),
+    getWorstAmendmentInflations(10),
+    getCompetitionByYear(),
+  ]).catch(() => { warmed = false; }); // retry on next call if DB wasn't ready
+  return Promise.resolve();
 }
 
 // --- Dashboard ---

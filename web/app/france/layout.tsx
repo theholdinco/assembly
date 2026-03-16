@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { warmCache } from "@/lib/france/queries";
 import "./france.css";
 
 export default async function FranceLayout({
@@ -6,6 +7,8 @@ export default async function FranceLayout({
 }: {
   children: React.ReactNode;
 }) {
+  warmCache();
+
   return (
     <div className="fr-layout">
       <aside className="fr-sidebar">
