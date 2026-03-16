@@ -71,6 +71,32 @@ export default async function FranceFlagsPage({
       </div>
 
       <section className="fr-section">
+        <h2 className="fr-section-title">How French Procurement Works</h2>
+        <div className="fr-explainer">
+          <div className="fr-explainer-item">
+            <strong>Appel d&apos;offres ouvert</strong>
+            <span>Open tender — any company can bid. Most transparent procedure.</span>
+          </div>
+          <div className="fr-explainer-item">
+            <strong>Procédure adaptée</strong>
+            <span>Simplified procedure for contracts below EU thresholds. Buyer sets rules.</span>
+          </div>
+          <div className="fr-explainer-item">
+            <strong>Procédure avec négociation</strong>
+            <span>Negotiated procedure — buyer negotiates terms with selected bidders.</span>
+          </div>
+          <div className="fr-explainer-item">
+            <strong>Marché négocié sans publicité ni concurrence</strong>
+            <span>Direct award without competition. Legal in emergencies or monopolies — but a red flag at scale.</span>
+          </div>
+          <div className="fr-explainer-item">
+            <strong>Accord-cadre</strong>
+            <span>Framework agreement — sets max ceiling for future call-offs. Amounts are ceilings, not actual spend.</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="fr-section">
         <h2 className="fr-section-title">Competition by Sector</h2>
         <p className="fr-text-muted">CPV divisions ranked by single-bid rate weighted by spend</p>
         <div className="fr-table-wrap">

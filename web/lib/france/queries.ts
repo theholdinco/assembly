@@ -302,69 +302,70 @@ export async function getContracts(
     hasAmendments,
   } = filters;
 
-  const conditions: string[] = [SANE_AMOUNT];
+  // Use c. prefix so conditions work in both COUNT and JOIN queries
+  const conditions: string[] = [`c.amount_ht > 0 AND c.amount_ht < 999999999`];
   const params: unknown[] = [];
 
   if (yearFrom !== undefined) {
     params.push(yearFrom);
-    conditions.push(`EXTRACT(YEAR FROM notification_date) >= $${params.length}`);
+    conditions.push(`EXTRACT(YEAR FROM c.notification_date) >= $${params.length}`);
   }
   if (yearTo !== undefined) {
     params.push(yearTo);
-    conditions.push(`EXTRACT(YEAR FROM notification_date) <= $${params.length}`);
+    conditions.push(`EXTRACT(YEAR FROM c.notification_date) <= $${params.length}`);
   }
   if (buyerSiret) {
     params.push(buyerSiret);
-    conditions.push(`buyer_siret = $${params.length}`);
+    conditions.push(`c.buyer_siret = $${params.length}`);
   }
   if (vendorId) {
     params.push(vendorId);
     conditions.push(
-      `uid IN (SELECT contract_uid FROM france_contract_vendors WHERE vendor_id = $${params.length})`
+      `c.uid IN (SELECT contract_uid FROM france_contract_vendors WHERE vendor_id = $${params.length})`
     );
   }
   if (cpvDivision) {
     params.push(cpvDivision);
-    conditions.push(`cpv_division = $${params.length}`);
+    conditions.push(`c.cpv_division = $${params.length}`);
   }
   if (procedure) {
     params.push(procedure);
-    conditions.push(`procedure = $${params.length}`);
+    conditions.push(`c.procedure = $${params.length}`);
   }
   if (amountMin !== undefined) {
     params.push(amountMin);
-    conditions.push(`amount_ht >= $${params.length}`);
+    conditions.push(`c.amount_ht >= $${params.length}`);
   }
   if (amountMax !== undefined) {
     params.push(amountMax);
-    conditions.push(`amount_ht <= $${params.length}`);
+    conditions.push(`c.amount_ht <= $${params.length}`);
   }
   if (search) {
     params.push(`%${search}%`);
     const idx = params.length;
     conditions.push(
-      `(object ILIKE $${idx} OR buyer_name ILIKE $${idx} OR uid ILIKE $${idx})`
+      `(c.object ILIKE $${idx} OR c.buyer_name ILIKE $${idx} OR c.uid ILIKE $${idx})`
     );
   }
   if (singleBidOnly) {
-    conditions.push("bids_received = 1");
+    conditions.push("c.bids_received = 1");
   }
   if (noCompetition) {
-    conditions.push(NO_COMP_FILTER);
+    conditions.push(`(c.procedure ILIKE '%sans%concurrence%' OR c.procedure ILIKE '%sans publicite%' OR c.procedure ILIKE '%negocie sans%')`);
   }
   if (nature === "marche") {
-    conditions.push("LOWER(nature) IN ('marché', 'marche')");
+    conditions.push("LOWER(c.nature) IN ('marché', 'marche')");
   } else if (nature === "accord-cadre") {
-    conditions.push("LOWER(nature) IN ('accord-cadre')");
+    conditions.push("LOWER(c.nature) IN ('accord-cadre')");
   }
   if (hasAmendments) {
-    conditions.push("uid IN (SELECT contract_uid FROM france_modifications)");
+    conditions.push("c.uid IN (SELECT contract_uid FROM france_modifications)");
   }
 
   const where = `WHERE ${conditions.join(" AND ")}`;
 
   const countRows = await query<{ total: string }>(
-    `SELECT COUNT(*)::text AS total FROM france_contracts ${where}`,
+    `SELECT COUNT(*)::text AS total FROM france_contracts c ${where}`,
     params
   );
   const total = Number(countRows[0].total);
@@ -377,10 +378,11 @@ export async function getContracts(
 
   const rows = await query<FranceContract>(
     `
-    SELECT *
-    FROM france_contracts
+    SELECT c.*, COALESCE(b.name, c.buyer_name, c.buyer_siret) AS buyer_name
+    FROM france_contracts c
+    LEFT JOIN france_buyers b ON b.siret = c.buyer_siret
     ${where}
-    ORDER BY amount_ht DESC NULLS LAST
+    ORDER BY c.amount_ht DESC NULLS LAST
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `,
     params
@@ -732,6 +734,10 @@ export function getCompetitionByYear(): Promise<
     avg_bids: Number(r.avg_bids),
   }));
   });
+}
+
+export function getCpvLabel(division: string): string {
+  return CPV_LABELS[division] ?? `CPV ${division}`;
 }
 
 // --- Sector competition ---

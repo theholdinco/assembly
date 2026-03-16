@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getContracts, ContractFilters } from "@/lib/france/queries";
+import { getContracts, ContractFilters, getCpvLabel } from "@/lib/france/queries";
 import { formatEuro } from "@/lib/france/format";
 
 export default async function ContractExplorerPage({
@@ -43,6 +43,15 @@ export default async function ContractExplorerPage({
     return `/france/contracts?${p.toString()}`;
   }
 
+  function clearParam(key: string): string {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v && k !== "page" && k !== key) p.set(k, v);
+    }
+    p.set("page", "1");
+    return `/france/contracts?${p.toString()}`;
+  }
+
   function natureUrl(value: string): string {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
@@ -78,6 +87,29 @@ export default async function ContractExplorerPage({
         <h1>Contract Explorer</h1>
         <p>{total.toLocaleString()} contracts found</p>
       </header>
+
+      {(params.cpv || params.buyer || params.vendor) && (
+        <div className="fr-active-filters">
+          {params.cpv && (
+            <span className="fr-filter-tag">
+              Sector: <strong>{getCpvLabel(params.cpv)}</strong>
+              <Link href={clearParam("cpv")} className="fr-filter-tag-clear">&times;</Link>
+            </span>
+          )}
+          {params.buyer && (
+            <span className="fr-filter-tag">
+              Buyer: <strong>{params.buyer}</strong>
+              <Link href={clearParam("buyer")} className="fr-filter-tag-clear">&times;</Link>
+            </span>
+          )}
+          {params.vendor && (
+            <span className="fr-filter-tag">
+              Vendor: <strong>{params.vendor}</strong>
+              <Link href={clearParam("vendor")} className="fr-filter-tag-clear">&times;</Link>
+            </span>
+          )}
+        </div>
+      )}
 
       <form
         method="GET"
