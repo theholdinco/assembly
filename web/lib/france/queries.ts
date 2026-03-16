@@ -26,9 +26,24 @@ const SANE_BIDS = "bids_received < 1000";
 const NO_COMP_FILTER = "(procedure ILIKE '%sans%concurrence%' OR procedure ILIKE '%sans publicite%' OR procedure ILIKE '%negocie sans%')";
 const MAX_PLAUSIBLE_INFLATION_PCT = 100_000;
 
+// Simple in-memory cache for expensive aggregate queries.
+// Data changes only on ingestion (daily at most), so 10min TTL is fine.
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const cache = new Map<string, { data: unknown; expires: number }>();
+
+function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const entry = cache.get(key);
+  if (entry && entry.expires > Date.now()) return Promise.resolve(entry.data as T);
+  return fn().then((data) => {
+    cache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+    return data;
+  });
+}
+
 // --- Dashboard ---
 
-export async function getDashboardSummary(): Promise<DashboardSummary> {
+export function getDashboardSummary(): Promise<DashboardSummary> {
+  return cached("dashboard_summary", async () => {
   const rows = await query<{
     total_contracts: string;
     total_spend: string;
@@ -52,9 +67,11 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     unique_vendors: Number(r.unique_vendors),
     avg_bids: Math.round(Number(r.avg_bids) * 10) / 10,
   };
+  });
 }
 
-export async function getSpendByYear(): Promise<SpendByYear[]> {
+export function getSpendByYear(): Promise<SpendByYear[]> {
+  return cached("spend_by_year", async () => {
   const rows = await query<{
     year: string;
     total_amount: string;
@@ -74,9 +91,11 @@ export async function getSpendByYear(): Promise<SpendByYear[]> {
     total_amount: Number(r.total_amount),
     contract_count: Number(r.contract_count),
   }));
+  });
 }
 
-export async function getTopBuyers(limit = 10): Promise<TopEntity[]> {
+export function getTopBuyers(limit = 10): Promise<TopEntity[]> {
+  return cached(`top_buyers_${limit}`, async () => {
   const rows = await query<{
     siret: string;
     name: string;
@@ -104,9 +123,11 @@ export async function getTopBuyers(limit = 10): Promise<TopEntity[]> {
     total_amount: Number(r.total_amount),
     contract_count: Number(r.contract_count),
   }));
+  });
 }
 
-export async function getTopVendors(limit = 10): Promise<TopEntity[]> {
+export function getTopVendors(limit = 10): Promise<TopEntity[]> {
+  return cached(`top_vendors_${limit}`, async () => {
   const rows = await query<{
     id: string;
     name: string;
@@ -134,9 +155,11 @@ export async function getTopVendors(limit = 10): Promise<TopEntity[]> {
     total_amount: Number(r.total_amount),
     contract_count: Number(r.contract_count),
   }));
+  });
 }
 
-export async function getProcedureBreakdown(): Promise<ProcedureBreakdown[]> {
+export function getProcedureBreakdown(): Promise<ProcedureBreakdown[]> {
+  return cached("procedure_breakdown", async () => {
   const rows = await query<{
     procedure: string;
     total_amount: string;
@@ -167,6 +190,7 @@ export async function getProcedureBreakdown(): Promise<ProcedureBreakdown[]> {
     contract_count: Number(r.contract_count),
     pct: Number(r.pct),
   }));
+  });
 }
 
 // --- Contract explorer ---
@@ -480,10 +504,11 @@ export async function getBuyerProcedureBreakdown(
 
 // --- Analytics ---
 
-export async function getVendorConcentration(
+export function getVendorConcentration(
   cpvDivision?: string,
   limit = 20
 ): Promise<(TopEntity & { market_share: number })[]> {
+  return cached(`vendor_conc_${cpvDivision}_${limit}`, async () => {
   const conditions = [`${SANE_AMOUNT}`];
   const params: unknown[] = [];
 
@@ -540,9 +565,10 @@ export async function getVendorConcentration(
     contract_count: Number(r.contract_count),
     market_share: Number(r.market_share),
   }));
+  });
 }
 
-export async function getAmendmentInflation(minPctIncrease = 50): Promise<
+export function getAmendmentInflation(minPctIncrease = 50): Promise<
   {
     contract_uid: string;
     object: string;
@@ -553,6 +579,7 @@ export async function getAmendmentInflation(minPctIncrease = 50): Promise<
     modification_count: number;
   }[]
 > {
+  return cached(`amendment_inflation_${minPctIncrease}`, async () => {
   const rows = await query<{
     contract_uid: string;
     object: string;
@@ -597,9 +624,10 @@ export async function getAmendmentInflation(minPctIncrease = 50): Promise<
     pct_increase: Number(r.pct_increase),
     modification_count: Number(r.modification_count),
   }));
+  });
 }
 
-export async function getCompetitionByYear(): Promise<
+export function getCompetitionByYear(): Promise<
   {
     year: number;
     procedure: string;
@@ -608,6 +636,7 @@ export async function getCompetitionByYear(): Promise<
     avg_bids: number;
   }[]
 > {
+  return cached("competition_by_year", async () => {
   const rows = await query<{
     year: string;
     procedure: string;
@@ -634,11 +663,13 @@ export async function getCompetitionByYear(): Promise<
     contract_count: Number(r.contract_count),
     avg_bids: Number(r.avg_bids),
   }));
+  });
 }
 
 // --- Flags ---
 
-export async function getFlagStats(): Promise<FlagStats> {
+export function getFlagStats(): Promise<FlagStats> {
+  return cached("flag_stats", async () => {
   const rows = await query<{
     single_bid_rate: string;
     single_bid_rate_2019: string;
@@ -700,11 +731,13 @@ export async function getFlagStats(): Promise<FlagStats> {
     doubledContracts: Number(r.doubled_contracts),
     missingBidDataPct: Number(r.missing_bid_pct),
   };
+  });
 }
 
-export async function getLowestCompetitionBuyers(
+export function getLowestCompetitionBuyers(
   limit = 10
 ): Promise<FlaggedBuyer[]> {
+  return cached(`lowest_comp_buyers_${limit}`, async () => {
   const rows = await query<{
     siret: string;
     name: string;
@@ -747,11 +780,13 @@ export async function getLowestCompetitionBuyers(
     singleBidPct: Number(r.single_bid_pct),
     totalSpend: Number(r.total_spend),
   }));
+  });
 }
 
-export async function getTopNoCompetitionSpenders(
+export function getTopNoCompetitionSpenders(
   limit = 10
 ): Promise<NoCompBuyer[]> {
+  return cached(`top_no_comp_${limit}`, async () => {
   const rows = await query<{
     siret: string;
     name: string;
@@ -780,11 +815,13 @@ export async function getTopNoCompetitionSpenders(
     noCompContracts: Number(r.no_comp_contracts),
     noCompSpend: Number(r.no_comp_spend),
   }));
+  });
 }
 
-export async function getWorstAmendmentInflations(
+export function getWorstAmendmentInflations(
   limit = 10
 ): Promise<InflatedContract[]> {
+  return cached(`worst_inflations_${limit}`, async () => {
   const rows = await query<{
     uid: string;
     object: string;
@@ -828,6 +865,7 @@ export async function getWorstAmendmentInflations(
     finalAmount: Number(r.final_amount),
     pctIncrease: Number(r.pct_increase),
   }));
+  });
 }
 
 export async function getBuyerFlags(siret: string): Promise<BuyerFlags> {
