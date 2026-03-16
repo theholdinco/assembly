@@ -55,7 +55,7 @@ Flags | Explore | Contracts | Analytics
 | Stat | Source query | Display |
 |------|-------------|---------|
 | Single-bid rate | COUNT(bids=1) / COUNT(bids>0) by year | "27.0%" with trend from 2019 baseline |
-| No-competition spend | SUM(amount) WHERE procedure ILIKE '%sans%concurrence%' | "X B EUR" total |
+| No-competition spend | SUM(amount) WHERE NO_COMP_FILTER, also COUNT for subtitle | "X B EUR" with "Y contracts" subtitle |
 | Doubled contracts | COUNT WHERE max(mod.amount) > 2x original | "X contracts" |
 | Missing bid data | COUNT WHERE bids_received IS NULL or 0 / total | "X% of contracts" |
 
@@ -72,7 +72,7 @@ Flags | Explore | Contracts | Analytics
 
 3. **Worst amendment inflations** — Contracts where the last modification (by publication_date) increased amount >100%.
    - Columns: contract object (linked), buyer, original amount, final amount, % increase.
-   - Query: JOIN modifications, take the last modification by publication_date (not MAX amount — we want the final state, not the peak), filter >100% increase. Exclude data bugs where pct_increase > 100,000% (defined as constant `MAX_PLAUSIBLE_INFLATION_PCT`).
+   - Query: JOIN france_contracts c ON c.uid = m.contract_uid (for c.amount_ht as originalAmount, c.object, c.buyer_name). Use DISTINCT ON (m.contract_uid) ORDER BY m.publication_date DESC to get last modification's new_amount_ht as finalAmount. Compute pct_increase = (finalAmount - originalAmount) / originalAmount * 100. Filter >100% increase. Exclude data bugs where pct_increase > 100,000% (defined as constant `MAX_PLAUSIBLE_INFLATION_PCT`).
 
 ### 2. Explore Page (`/france/explore`)
 
@@ -144,7 +144,7 @@ Same section pattern as buyer profiles.
 Flags computed per-vendor:
 
 - **"On X multi-vendor contracts"** — count of distinct contract_uids where this vendor appears AND the contract has 3+ vendors total (requires self-join on france_contract_vendors: count vendors per contract_uid, filter >=3, then count contracts for this vendor). Badge variant: info.
-- **"X% spend from single buyer"** — shown if >60% of their total comes from one buyer_siret. Computed via: join france_contract_vendors -> france_contracts, group by buyer_siret, take max(sum(amount_ht)) / total. buyer_name is denormalized on france_contracts. Badge variant: warning.
+- **"X% spend from single buyer"** — shown if >60% of their total comes from one buyer_siret. Computed via: join france_contract_vendors -> france_contracts, group by buyer_siret, compute per-buyer spend, then `MAX(per_buyer_spend) / SUM(per_buyer_spend)` (denominator is the vendor's own total, not global). buyer_name is denormalized on france_contracts. Badge variant: warning.
 - **"X no-competition awards"** — shown if they won contracts via no-competition procedure. Badge variant: warning.
 
 ### 6. Data Quality Banner
