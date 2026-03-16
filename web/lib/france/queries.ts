@@ -1,13 +1,19 @@
 import { query } from "@/lib/db";
 import {
+  BuyerFlags,
   DashboardSummary,
+  FlaggedBuyer,
+  FlagStats,
   FranceBuyer,
   FranceContract,
   FranceModification,
   FranceVendor,
+  InflatedContract,
+  NoCompBuyer,
   ProcedureBreakdown,
   SpendByYear,
   TopEntity,
+  VendorFlags,
 } from "./types";
 
 // Sanity filters for known data quality issues in DECP source
@@ -17,6 +23,8 @@ import {
 const SANE_AMOUNT = "amount_ht > 0 AND amount_ht < 999999999"; // 0 < amount < ~1B€
 const SANE_DATE = "notification_date >= '2010-01-01' AND notification_date <= '2030-12-31'";
 const SANE_BIDS = "bids_received < 1000";
+const NO_COMP_FILTER = "(procedure ILIKE '%sans%concurrence%' OR procedure ILIKE '%sans publicite%' OR procedure ILIKE '%negocie sans%')";
+const MAX_PLAUSIBLE_INFLATION_PCT = 100_000;
 
 // --- Dashboard ---
 
@@ -175,6 +183,10 @@ export interface ContractFilters {
   search?: string;
   page?: number;
   pageSize?: number;
+  singleBidOnly?: boolean;
+  noCompetition?: boolean;
+  nature?: "marche" | "accord-cadre";
+  hasAmendments?: boolean;
 }
 
 export async function getContracts(
@@ -192,6 +204,10 @@ export async function getContracts(
     search,
     page = 1,
     pageSize = 50,
+    singleBidOnly,
+    noCompetition,
+    nature,
+    hasAmendments,
   } = filters;
 
   const conditions: string[] = [SANE_AMOUNT];
@@ -237,6 +253,20 @@ export async function getContracts(
     conditions.push(
       `(object ILIKE $${idx} OR buyer_name ILIKE $${idx} OR uid ILIKE $${idx})`
     );
+  }
+  if (singleBidOnly) {
+    conditions.push("bids_received = 1");
+  }
+  if (noCompetition) {
+    conditions.push(NO_COMP_FILTER);
+  }
+  if (nature === "marche") {
+    conditions.push("LOWER(nature) IN ('marché', 'marche')");
+  } else if (nature === "accord-cadre") {
+    conditions.push("LOWER(nature) IN ('accord-cadre')");
+  }
+  if (hasAmendments) {
+    conditions.push("uid IN (SELECT contract_uid FROM france_modifications)");
   }
 
   const where = `WHERE ${conditions.join(" AND ")}`;
@@ -602,4 +632,297 @@ export async function getCompetitionByYear(): Promise<
     contract_count: Number(r.contract_count),
     avg_bids: Number(r.avg_bids),
   }));
+}
+
+// --- Flags ---
+
+export async function getFlagStats(): Promise<FlagStats> {
+  const rows = await query<{
+    single_bid_rate: string;
+    single_bid_rate_2019: string;
+    no_comp_spend: string;
+    no_comp_contracts: string;
+    doubled_contracts: string;
+    missing_bid_pct: string;
+  }>(`
+    WITH bid_stats AS (
+      SELECT
+        COUNT(*) FILTER (WHERE bids_received = 1)::numeric AS single_bid,
+        COUNT(*) FILTER (WHERE bids_received > 0 AND ${SANE_BIDS})::numeric AS with_bids
+      FROM france_contracts
+      WHERE ${SANE_AMOUNT}
+    ),
+    bid_stats_2019 AS (
+      SELECT
+        COUNT(*) FILTER (WHERE bids_received = 1)::numeric AS single_bid,
+        COUNT(*) FILTER (WHERE bids_received > 0 AND ${SANE_BIDS})::numeric AS with_bids
+      FROM france_contracts
+      WHERE ${SANE_AMOUNT} AND EXTRACT(YEAR FROM notification_date) = 2019
+    ),
+    no_comp AS (
+      SELECT
+        COALESCE(SUM(amount_ht), 0) AS spend,
+        COUNT(*) AS cnt
+      FROM france_contracts
+      WHERE ${SANE_AMOUNT} AND ${NO_COMP_FILTER}
+    ),
+    doubled AS (
+      SELECT COUNT(DISTINCT m.contract_uid) AS cnt
+      FROM france_modifications m
+      JOIN france_contracts c ON c.uid = m.contract_uid
+      WHERE c.amount_ht > 0 AND ${SANE_AMOUNT}
+        AND m.new_amount_ht > c.amount_ht * 2
+        AND m.new_amount_ht < 999999999
+    ),
+    missing AS (
+      SELECT
+        COUNT(*) FILTER (WHERE bids_received IS NULL OR bids_received = 0)::numeric AS no_data,
+        COUNT(*)::numeric AS total
+      FROM france_contracts
+    )
+    SELECT
+      ROUND(COALESCE(b.single_bid / NULLIF(b.with_bids, 0) * 100, 0), 1)::text AS single_bid_rate,
+      ROUND(COALESCE(b19.single_bid / NULLIF(b19.with_bids, 0) * 100, 0), 1)::text AS single_bid_rate_2019,
+      nc.spend::text AS no_comp_spend,
+      nc.cnt::text AS no_comp_contracts,
+      d.cnt::text AS doubled_contracts,
+      ROUND(COALESCE(mi.no_data / NULLIF(mi.total, 0) * 100, 0), 1)::text AS missing_bid_pct
+    FROM bid_stats b, bid_stats_2019 b19, no_comp nc, doubled d, missing mi
+  `);
+  const r = rows[0];
+  return {
+    singleBidRate: Number(r.single_bid_rate),
+    singleBidRate2019: Number(r.single_bid_rate_2019),
+    noCompetitionSpend: Number(r.no_comp_spend),
+    noCompetitionContracts: Number(r.no_comp_contracts),
+    doubledContracts: Number(r.doubled_contracts),
+    missingBidDataPct: Number(r.missing_bid_pct),
+  };
+}
+
+export async function getLowestCompetitionBuyers(
+  limit = 10
+): Promise<FlaggedBuyer[]> {
+  const rows = await query<{
+    siret: string;
+    name: string;
+    contracts_with_bids: string;
+    single_bid_count: string;
+    single_bid_pct: string;
+    total_spend: string;
+  }>(
+    `
+    SELECT
+      c.buyer_siret AS siret,
+      COALESCE(b.name, c.buyer_siret) AS name,
+      COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS})::text AS contracts_with_bids,
+      COUNT(*) FILTER (WHERE c.bids_received = 1)::text AS single_bid_count,
+      ROUND(
+        COUNT(*) FILTER (WHERE c.bids_received = 1)::numeric /
+        NULLIF(COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}), 0) * 100, 1
+      )::text AS single_bid_pct,
+      COALESCE(SUM(CASE WHEN ${SANE_AMOUNT} THEN c.amount_ht END), 0)::text AS total_spend
+    FROM france_contracts c
+    LEFT JOIN france_buyers b ON b.siret = c.buyer_siret
+    WHERE c.buyer_siret IS NOT NULL
+    GROUP BY c.buyer_siret, b.name
+    HAVING COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}) >= 10
+    ORDER BY
+      COUNT(*) FILTER (WHERE c.bids_received = 1)::numeric /
+      NULLIF(COUNT(*) FILTER (WHERE c.bids_received > 0 AND ${SANE_BIDS}), 0) DESC NULLS LAST
+    LIMIT $1
+    `,
+    [limit]
+  );
+  return rows.map((r) => ({
+    siret: r.siret,
+    name: r.name,
+    contractsWithBids: Number(r.contracts_with_bids),
+    singleBidCount: Number(r.single_bid_count),
+    singleBidPct: Number(r.single_bid_pct),
+    totalSpend: Number(r.total_spend),
+  }));
+}
+
+export async function getTopNoCompetitionSpenders(
+  limit = 10
+): Promise<NoCompBuyer[]> {
+  const rows = await query<{
+    siret: string;
+    name: string;
+    no_comp_contracts: string;
+    no_comp_spend: string;
+  }>(
+    `
+    SELECT
+      c.buyer_siret AS siret,
+      COALESCE(b.name, c.buyer_siret) AS name,
+      COUNT(*)::text AS no_comp_contracts,
+      COALESCE(SUM(c.amount_ht), 0)::text AS no_comp_spend
+    FROM france_contracts c
+    LEFT JOIN france_buyers b ON b.siret = c.buyer_siret
+    WHERE ${SANE_AMOUNT} AND ${NO_COMP_FILTER} AND c.buyer_siret IS NOT NULL
+    GROUP BY c.buyer_siret, b.name
+    HAVING COUNT(*) >= 5
+    ORDER BY SUM(c.amount_ht) DESC
+    LIMIT $1
+    `,
+    [limit]
+  );
+  return rows.map((r) => ({
+    siret: r.siret,
+    name: r.name,
+    noCompContracts: Number(r.no_comp_contracts),
+    noCompSpend: Number(r.no_comp_spend),
+  }));
+}
+
+export async function getWorstAmendmentInflations(
+  limit = 10
+): Promise<InflatedContract[]> {
+  const rows = await query<{
+    uid: string;
+    object: string;
+    buyer_name: string;
+    original_amount: string;
+    final_amount: string;
+    pct_increase: string;
+  }>(
+    `
+    WITH last_mod AS (
+      SELECT DISTINCT ON (contract_uid)
+        contract_uid,
+        new_amount_ht
+      FROM france_modifications
+      WHERE new_amount_ht IS NOT NULL
+      ORDER BY contract_uid, publication_date DESC NULLS LAST
+    )
+    SELECT
+      c.uid,
+      c.object,
+      COALESCE(c.buyer_name, c.buyer_siret) AS buyer_name,
+      c.amount_ht::text AS original_amount,
+      lm.new_amount_ht::text AS final_amount,
+      ROUND(((lm.new_amount_ht - c.amount_ht) / NULLIF(c.amount_ht, 0) * 100)::numeric, 1)::text AS pct_increase
+    FROM france_contracts c
+    JOIN last_mod lm ON lm.contract_uid = c.uid
+    WHERE c.amount_ht > 100000 AND ${SANE_AMOUNT}
+      AND lm.new_amount_ht > c.amount_ht * 2
+      AND lm.new_amount_ht < 999999999
+      AND ((lm.new_amount_ht - c.amount_ht) / NULLIF(c.amount_ht, 0) * 100) < $1
+    ORDER BY (lm.new_amount_ht - c.amount_ht) DESC
+    LIMIT $2
+    `,
+    [MAX_PLAUSIBLE_INFLATION_PCT, limit]
+  );
+  return rows.map((r) => ({
+    uid: r.uid,
+    object: r.object,
+    buyerName: r.buyer_name,
+    originalAmount: Number(r.original_amount),
+    finalAmount: Number(r.final_amount),
+    pctIncrease: Number(r.pct_increase),
+  }));
+}
+
+export async function getBuyerFlags(siret: string): Promise<BuyerFlags> {
+  const rows = await query<{
+    single_bid_pct: string | null;
+    no_comp_count: string;
+    no_comp_spend: string;
+    inflated_count: string;
+  }>(
+    `
+    WITH buyer_bids AS (
+      SELECT
+        COUNT(*) FILTER (WHERE bids_received = 1) AS single_bid,
+        COUNT(*) FILTER (WHERE bids_received > 0 AND ${SANE_BIDS}) AS with_bids
+      FROM france_contracts
+      WHERE buyer_siret = $1 AND ${SANE_AMOUNT}
+    ),
+    buyer_no_comp AS (
+      SELECT COUNT(*) AS cnt, COALESCE(SUM(amount_ht), 0) AS spend
+      FROM france_contracts
+      WHERE buyer_siret = $1 AND ${SANE_AMOUNT} AND ${NO_COMP_FILTER}
+    ),
+    buyer_inflated AS (
+      SELECT COUNT(DISTINCT m.contract_uid) AS cnt
+      FROM france_modifications m
+      JOIN france_contracts c ON c.uid = m.contract_uid
+      WHERE c.buyer_siret = $1
+        AND c.amount_ht > 0 AND ${SANE_AMOUNT}
+        AND m.new_amount_ht > c.amount_ht * 2
+        AND m.new_amount_ht < 999999999
+    )
+    SELECT
+      CASE WHEN bb.with_bids >= 5 THEN
+        ROUND(bb.single_bid::numeric / bb.with_bids * 100, 1)::text
+      ELSE NULL END AS single_bid_pct,
+      nc.cnt::text AS no_comp_count,
+      nc.spend::text AS no_comp_spend,
+      bi.cnt::text AS inflated_count
+    FROM buyer_bids bb, buyer_no_comp nc, buyer_inflated bi
+    `,
+    [siret]
+  );
+  const r = rows[0];
+  return {
+    singleBidPct: r.single_bid_pct ? Number(r.single_bid_pct) : null,
+    noCompetitionCount: Number(r.no_comp_count),
+    noCompetitionSpend: Number(r.no_comp_spend),
+    inflatedContractCount: Number(r.inflated_count),
+  };
+}
+
+export async function getVendorFlags(vendorId: string): Promise<VendorFlags> {
+  const rows = await query<{
+    multi_vendor_contracts: string;
+    top_buyer_pct: string;
+    top_buyer_name: string;
+    no_comp_awards: string;
+  }>(
+    `
+    WITH vendor_contracts AS (
+      SELECT cv.contract_uid, c.buyer_siret, c.buyer_name, c.amount_ht, c.procedure
+      FROM france_contract_vendors cv
+      JOIN france_contracts c ON c.uid = cv.contract_uid
+      WHERE cv.vendor_id = $1 AND ${SANE_AMOUNT}
+    ),
+    multi AS (
+      SELECT COUNT(*) AS cnt
+      FROM vendor_contracts vc
+      WHERE (SELECT COUNT(*) FROM france_contract_vendors cv2 WHERE cv2.contract_uid = vc.contract_uid) >= 3
+    ),
+    buyer_conc AS (
+      SELECT
+        COALESCE(vc.buyer_name, vc.buyer_siret) AS name,
+        SUM(vc.amount_ht) AS buyer_spend,
+        SUM(SUM(vc.amount_ht)) OVER () AS total_spend
+      FROM vendor_contracts vc
+      GROUP BY COALESCE(vc.buyer_name, vc.buyer_siret)
+      ORDER BY SUM(vc.amount_ht) DESC
+      LIMIT 1
+    ),
+    no_comp AS (
+      SELECT COUNT(*) AS cnt
+      FROM vendor_contracts vc
+      WHERE ${NO_COMP_FILTER.replace(/procedure/g, "vc.procedure")}
+    )
+    SELECT
+      m.cnt::text AS multi_vendor_contracts,
+      ROUND(COALESCE(bc.buyer_spend / NULLIF(bc.total_spend, 0) * 100, 0), 1)::text AS top_buyer_pct,
+      COALESCE(bc.name, '') AS top_buyer_name,
+      nc.cnt::text AS no_comp_awards
+    FROM multi m, no_comp nc
+    LEFT JOIN buyer_conc bc ON true
+    `,
+    [vendorId]
+  );
+  const r = rows[0];
+  return {
+    multiVendorContracts: Number(r.multi_vendor_contracts),
+    topBuyerConcentrationPct: Number(r.top_buyer_pct),
+    topBuyerName: r.top_buyer_name,
+    noCompetitionAwards: Number(r.no_comp_awards),
+  };
 }

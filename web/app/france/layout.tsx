@@ -24,8 +24,12 @@ export default async function FranceLayout({
 
         <nav className="fr-sidebar-nav">
           <Link href="/france" className="fr-nav-link">
+            <span className="fr-nav-icon">&#9888;</span>
+            Flags
+          </Link>
+          <Link href="/france/explore" className="fr-nav-link">
             <span className="fr-nav-icon">&#9632;</span>
-            Dashboard
+            Explore
           </Link>
           <Link href="/france/contracts" className="fr-nav-link">
             <span className="fr-nav-icon">&#9670;</span>
@@ -51,7 +55,14 @@ export default async function FranceLayout({
         </div>
       </aside>
 
-      <main className="fr-main">{children}</main>
+      <main className="fr-main">
+        <div className="fr-data-banner">
+          DECP data reflects award notices only. Framework agreement amounts are
+          maximum ceilings, not actual spend. Vendor totals may be overstated on
+          multi-vendor contracts.
+        </div>
+        {children}
+      </main>
     </div>
   );
 }

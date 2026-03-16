@@ -23,11 +23,35 @@ export default async function ContractExplorerPage({
     search: params.q,
     page: currentPage,
     pageSize: 50,
+    singleBidOnly: params.singleBid === "1",
+    noCompetition: params.noComp === "1",
+    nature: params.nature === "marche" || params.nature === "accord-cadre" ? params.nature : undefined,
+    hasAmendments: params.amended === "1",
   };
 
   const { rows, total } = await getContracts(filters);
 
   const totalPages = Math.ceil(total / 50);
+
+  function toggleParam(key: string): string {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v && k !== "page" && k !== key) p.set(k, v);
+    }
+    if (params[key] !== "1") p.set(key, "1");
+    p.set("page", "1");
+    return `/france/contracts?${p.toString()}`;
+  }
+
+  function natureUrl(value: string): string {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v && k !== "page" && k !== "nature") p.set(k, v);
+    }
+    if (params.nature !== value) p.set("nature", value);
+    p.set("page", "1");
+    return `/france/contracts?${p.toString()}`;
+  }
 
   function buildUrl(page: number): string {
     const p = new URLSearchParams();
@@ -40,6 +64,10 @@ export default async function ContractExplorerPage({
     if (params.procedure) p.set("procedure", params.procedure);
     if (params.amountMin) p.set("amountMin", params.amountMin);
     if (params.amountMax) p.set("amountMax", params.amountMax);
+    if (params.singleBid) p.set("singleBid", params.singleBid);
+    if (params.noComp) p.set("noComp", params.noComp);
+    if (params.nature) p.set("nature", params.nature);
+    if (params.amended) p.set("amended", params.amended);
     p.set("page", String(page));
     return `/france/contracts?${p.toString()}`;
   }
@@ -74,10 +102,55 @@ export default async function ContractExplorerPage({
           placeholder="Year to"
           className="fr-input fr-input--narrow"
         />
+        <input
+          name="amountMin"
+          defaultValue={params.amountMin ?? ""}
+          placeholder="Min €"
+          className="fr-input fr-input--narrow"
+        />
+        <input
+          name="amountMax"
+          defaultValue={params.amountMax ?? ""}
+          placeholder="Max €"
+          className="fr-input fr-input--narrow"
+        />
         <button type="submit" className="fr-btn fr-btn--primary">
           Filter
         </button>
       </form>
+
+      <div className="fr-filter-toggles">
+        <Link
+          href={toggleParam("singleBid")}
+          className={`fr-toggle ${params.singleBid === "1" ? "fr-toggle--active" : ""}`}
+        >
+          Single bid only
+        </Link>
+        <Link
+          href={toggleParam("noComp")}
+          className={`fr-toggle ${params.noComp === "1" ? "fr-toggle--active" : ""}`}
+        >
+          No competition
+        </Link>
+        <Link
+          href={toggleParam("amended")}
+          className={`fr-toggle ${params.amended === "1" ? "fr-toggle--active" : ""}`}
+        >
+          Has amendments
+        </Link>
+        <Link
+          href={natureUrl("marche")}
+          className={`fr-toggle ${params.nature === "marche" ? "fr-toggle--active" : ""}`}
+        >
+          Marchés
+        </Link>
+        <Link
+          href={natureUrl("accord-cadre")}
+          className={`fr-toggle ${params.nature === "accord-cadre" ? "fr-toggle--active" : ""}`}
+        >
+          Accords-cadres
+        </Link>
+      </div>
 
       <div className="fr-table-wrap">
         <table className="fr-table">

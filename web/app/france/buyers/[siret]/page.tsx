@@ -5,7 +5,9 @@ import {
   getBuyerContracts,
   getBuyerTopVendors,
   getBuyerProcedureBreakdown,
+  getBuyerFlags,
 } from "@/lib/france/queries";
+import { BuyerFlags } from "@/lib/france/types";
 import {
   TopEntitiesChart,
   ProcedureBreakdownChart,
@@ -21,10 +23,11 @@ export default async function BuyerPage({
   const buyer = await getBuyerBySiret(siret);
   if (!buyer) notFound();
 
-  const [contracts, topVendors, procedureBreakdown] = await Promise.all([
+  const [contracts, topVendors, procedureBreakdown, flags] = await Promise.all([
     getBuyerContracts(siret),
     getBuyerTopVendors(siret),
     getBuyerProcedureBreakdown(siret),
+    getBuyerFlags(siret),
   ]);
 
   const cards = [
@@ -55,6 +58,32 @@ export default async function BuyerPage({
           </div>
         ))}
       </div>
+
+      {((flags.singleBidPct !== null && flags.singleBidPct > 50) || flags.noCompetitionCount > 0 || flags.inflatedContractCount > 0) && (
+        <div className="fr-flag-section">
+          {flags.singleBidPct !== null && flags.singleBidPct > 50 && (
+            <div className={`fr-flag-card ${flags.singleBidPct > 80 ? 'fr-flag-card--danger' : 'fr-flag-card--warning'}`}>
+              <div className="fr-flag-value">{flags.singleBidPct}%</div>
+              <div className="fr-flag-label">single-bid rate</div>
+              <div className="fr-flag-desc">of contracts with bid data had only one bidder</div>
+            </div>
+          )}
+          {flags.noCompetitionCount > 0 && (
+            <div className="fr-flag-card fr-flag-card--warning">
+              <div className="fr-flag-value">{flags.noCompetitionCount}</div>
+              <div className="fr-flag-label">no-competition contracts</div>
+              <div className="fr-flag-desc">{formatEuro(flags.noCompetitionSpend)} awarded without competition</div>
+            </div>
+          )}
+          {flags.inflatedContractCount > 0 && (
+            <div className="fr-flag-card fr-flag-card--danger">
+              <div className="fr-flag-value">{flags.inflatedContractCount}</div>
+              <div className="fr-flag-label">contracts doubled post-award</div>
+              <div className="fr-flag-desc">amendment increased amount by more than 100%</div>
+            </div>
+          )}
+        </div>
+      )}
 
       <section className="fr-section">
         <h2 className="fr-section-title">Procedure Types</h2>

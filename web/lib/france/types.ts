@@ -153,3 +153,53 @@ export interface DashboardSummary {
   unique_buyers: number;
   avg_bids: number;
 }
+
+// --- Flag types ---
+
+export interface FlagStats {
+  singleBidRate: number;
+  singleBidRate2019: number;
+  noCompetitionSpend: number;
+  noCompetitionContracts: number;
+  doubledContracts: number;
+  missingBidDataPct: number;
+}
+
+export interface FlaggedBuyer {
+  siret: string;
+  name: string;
+  contractsWithBids: number;
+  singleBidCount: number;
+  singleBidPct: number;
+  totalSpend: number;
+}
+
+export interface NoCompBuyer {
+  siret: string;
+  name: string;
+  noCompContracts: number;
+  noCompSpend: number;
+}
+
+export interface InflatedContract {
+  uid: string;
+  object: string;
+  buyerName: string;
+  originalAmount: number;
+  finalAmount: number;
+  pctIncrease: number;
+}
+
+export interface BuyerFlags {
+  singleBidPct: number | null;
+  noCompetitionCount: number;
+  noCompetitionSpend: number;
+  inflatedContractCount: number;
+}
+
+export interface VendorFlags {
+  multiVendorContracts: number;
+  topBuyerConcentrationPct: number;
+  topBuyerName: string;
+  noCompetitionAwards: number;
+}

@@ -4,7 +4,9 @@ import {
   getVendorById,
   getVendorContracts,
   getVendorTopBuyers,
+  getVendorFlags,
 } from "@/lib/france/queries";
+import { VendorFlags } from "@/lib/france/types";
 import { TopEntitiesChart } from "@/components/france/Charts";
 import { formatEuro } from "@/lib/france/format";
 
@@ -19,14 +21,15 @@ export default async function VendorProfilePage({
   const vendor = await getVendorById(vendorId);
   if (!vendor) notFound();
 
-  const [contracts, topBuyers] = await Promise.all([
+  const [contracts, topBuyers, vendorFlags] = await Promise.all([
     getVendorContracts(vendorId),
     getVendorTopBuyers(vendorId),
+    getVendorFlags(vendorId),
   ]);
 
   const summaryCards = [
     { label: "Contracts", value: vendor.contract_count.toLocaleString() },
-    { label: "Total Spend", value: formatEuro(vendor.total_amount_ht) },
+    { label: "Total Spend", value: formatEuro(vendor.total_amount_ht), sub: "May include shared framework ceilings" },
     {
       label: "First Seen",
       value: vendor.first_seen
@@ -55,9 +58,36 @@ export default async function VendorProfilePage({
           <div key={card.label} className="fr-stat-card">
             <div className="fr-stat-label">{card.label}</div>
             <div className="fr-stat-value">{card.value}</div>
+            {card.sub && <div className="fr-stat-sub">{card.sub}</div>}
           </div>
         ))}
       </div>
+
+      {(vendorFlags.multiVendorContracts > 0 || vendorFlags.topBuyerConcentrationPct > 60 || vendorFlags.noCompetitionAwards > 0) && (
+        <div className="fr-flag-section">
+          {vendorFlags.multiVendorContracts > 0 && (
+            <div className="fr-flag-card fr-flag-card--info">
+              <div className="fr-flag-value">{vendorFlags.multiVendorContracts}</div>
+              <div className="fr-flag-label">multi-vendor contracts</div>
+              <div className="fr-flag-desc">appears on contracts with 3+ vendors</div>
+            </div>
+          )}
+          {vendorFlags.topBuyerConcentrationPct > 60 && (
+            <div className="fr-flag-card fr-flag-card--warning">
+              <div className="fr-flag-value">{vendorFlags.topBuyerConcentrationPct}%</div>
+              <div className="fr-flag-label">from {vendorFlags.topBuyerName}</div>
+              <div className="fr-flag-desc">spend concentrated with single buyer</div>
+            </div>
+          )}
+          {vendorFlags.noCompetitionAwards > 0 && (
+            <div className="fr-flag-card fr-flag-card--warning">
+              <div className="fr-flag-value">{vendorFlags.noCompetitionAwards}</div>
+              <div className="fr-flag-label">no-competition awards</div>
+              <div className="fr-flag-desc">won without competitive procedure</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {topBuyers.length > 0 && (
         <section className="fr-section">
