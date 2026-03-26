@@ -67,6 +67,42 @@ export default function BuyListUpload({ initialItems }: { initialItems: BuyListI
     return n.toLocaleString();
   }
 
+  function handleDownload() {
+    const headers = ["obligor","facility","sector","moodys","sp","spread_bps","reference_rate","price","maturity","facility_size","leverage","interest_coverage","cov_lite","average_life","recovery","notes"];
+    const escapeField = (val: string | null | undefined) => {
+      if (val == null || val === "") return "";
+      const s = String(val);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = items.map((item) => [
+      item.obligorName,
+      item.facilityName,
+      item.sector,
+      item.moodysRating,
+      item.spRating,
+      item.spreadBps,
+      item.referenceRate,
+      item.price,
+      item.maturityDate,
+      item.facilitySize,
+      item.leverage,
+      item.interestCoverage,
+      item.isCovLite != null ? (item.isCovLite ? "Yes" : "No") : null,
+      item.averageLifeYears,
+      item.recoveryRate,
+      item.notes,
+    ].map((v) => escapeField(v != null ? String(v) : null)).join(","));
+
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "buy-list.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="ic-section" style={{
       background: "var(--color-surface)",
@@ -107,6 +143,13 @@ export default function BuyListUpload({ initialItems }: { initialItems: BuyListI
                 style={{ fontSize: "0.85rem", padding: "0.45rem 0.9rem" }}
               >
                 {expanded ? "Collapse" : "View"}
+              </button>
+              <button
+                onClick={handleDownload}
+                className="btn-secondary"
+                style={{ fontSize: "0.85rem", padding: "0.45rem 0.9rem" }}
+              >
+                Download CSV
               </button>
               <button
                 onClick={handleClear}
