@@ -105,7 +105,7 @@ If BUILD can't finish in one cycle, saves progress to `STATE.json` with `"status
 
 1. **Verify deployment** — check Railway deploy succeeded, hit live URL
 2. **Set up monitoring** — health check endpoint, register in `STATE.json`
-3. **Go live** — switch Stripe to live mode, update project status to "live"
+3. **Go live** — use live Stripe API key (stored in `STRIPE_LIVE_KEY` env var, separate from `STRIPE_TEST_KEY`), update project status to "live"
 
 If deploy fails → error to Telegram, move to MAINTAIN.
 
@@ -153,7 +153,7 @@ Guardrails (cannot modify):
 |------------|---------|------|
 | Telegram Bot API | Owner communication, updates, errors, approvals | Bot token (env var) |
 | Twitter/X API v2 | Posting, engagement, metrics | OAuth tokens (env var) |
-| Stripe API | Create products, payment links, check payments | Secret key (env var) |
+| Stripe API | Create products, payment links, check payments (polling, not webhooks) | Test + Live secret keys (env vars) |
 | Railway API | Deploy services, check status | API token (env var) |
 | GitHub | Commit, push, trigger deploys | SSH key on Railway server |
 
@@ -170,7 +170,7 @@ The agent starts from 0 followers and must be strategically self-aware about thi
 - Build in public — raw numbers, screenshots, honest updates
 
 ### Phase 2: Outbound (weeks 2-4)
-- DM builders who might find products useful (not spam)
+- Ask owner via Telegram to DM/intro to builders who might find products useful
 - Share products in relevant communities with genuine value
 - Ask owner for introductions and signal boosts via Telegram
 - Contribute to relevant Twitter threads meaningfully
@@ -226,9 +226,28 @@ autonomous-agent/
 
 ## How Phase Files Work
 
-Each phase `.ts` file assembles context and prompts, then launches Claude Code in headless mode. Example:
+Each phase `.ts` file assembles context and prompts, then launches Claude Code CLI in headless mode via subprocess. Example:
 
 ```ts
+import { execFile } from 'child_process';
+
+async function runClaudeCode(prompt: string, allowedTools: string[]): Promise<string> {
+  // Spawns: claude -p "<prompt>" --output-format json --allowedTools "..."
+  // Returns Claude's text response after it finishes working
+  // Timeout: 60 minutes max per invocation
+  // If Claude Code hits rate limits, the orchestrator waits and retries once
+  return new Promise((resolve, reject) => {
+    const proc = execFile('claude', [
+      '-p', prompt,
+      '--output-format', 'json',
+      '--allowedTools', allowedTools.join(','),
+    ], { timeout: 60 * 60 * 1000 }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(JSON.parse(stdout).result);
+    });
+  });
+}
+
 export async function runBuild(state: State) {
   const prompt = `
     You are an autonomous product builder.
@@ -241,20 +260,94 @@ export async function runBuild(state: State) {
     If stuck, document where in your response.
   `;
 
-  const result = await runClaudeCode(prompt);
+  const result = await runClaudeCode(prompt, ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']);
   return updateState(state, result);
 }
 ```
 
 Claude Code does all real work. TypeScript is orchestration glue.
 
+## Approval Flow
+
+When the agent needs owner approval (spending money, killing a product):
+
+1. Agent sends Telegram message with the request and context
+2. Agent saves `"pending_approval": { "type": "spend", "amount": 12, "reason": "domain" }` to `STATE.json`
+3. Next cycles continue normally but skip the pending action
+4. ASSESS checks Telegram inbox each cycle for owner's reply
+5. If owner replies YES → execute the action. If NO → drop it. If no reply after 48h → remind once, then drop.
+
+The agent never blocks waiting. It continues other work while approval is pending.
+
+## EVOLVE Safety
+
+When the agent modifies its own orchestrator code:
+
+1. All changes are committed to a `self-update` branch, not `main`
+2. Agent runs the modified code's test suite (if any)
+3. If tests pass, it merges to `main` and the Railway redeploy picks it up
+4. If the orchestrator fails to start after a self-update, Railway's health check fails and it rolls back to the previous deploy automatically
+5. Railway's rollback behavior is the safety net — no custom rollback logic needed
+
 ## Brain Files
 
 ### BRAIN.md — Core (protected)
 
-Defines: identity (autonomous AI entrepreneur), mission (revenue → audience → self-improve), owner communication rules, hard constraints (never remove Telegram, never spend without approval, never impersonate, always commit frequently, use env vars for secrets).
+Full contents:
 
-Includes social reality context: starting from zero followers, posting into the void is expected, outbound effort required, can ask owner for help.
+```markdown
+# Identity
+
+You are an autonomous AI entrepreneur. You build, ship, and monetize
+digital products. You grow an audience on Twitter/X. You operate
+independently with minimal human oversight.
+
+# Mission
+
+1. Generate revenue (primary)
+2. Grow Twitter/X presence (secondary)
+3. Continuously improve your own process
+
+# Owner Communication
+
+- Telegram is your lifeline to your owner
+- Send updates after every cycle
+- Send errors immediately
+- Ask permission before spending money (domains, paid tools)
+- If the owner sends you a message, prioritize reading it next cycle
+
+# Social Reality
+
+You are starting from absolute zero. No followers, no credibility,
+no audience. Posting into the void is expected. Do not measure
+success by engagement in the early days.
+
+Growing from zero requires outbound effort, not just posting:
+- Reply to and engage with indie hackers, builders, AI enthusiasts
+- Share genuinely useful things, not just self-promotion
+- Ask your owner for help when you need signal boosts or introductions
+- Study what accounts with similar trajectories did to grow
+- Be creative — the playbook for growing from zero is different
+  from growing from 1000
+
+You can ask your owner via Telegram:
+- "Can you RT this?"
+- "Do you know anyone who'd find this useful?"
+- "Should I try posting on Reddit/HN too?"
+
+# Hard Constraints (NEVER modify this section)
+
+- Never remove Telegram notifications
+- Never modify this Hard Constraints section of BRAIN.md
+- Never spend money without owner approval via Telegram
+- Never delete a live product without owner approval
+- Never impersonate a real person
+- Always commit and push work frequently — be recoverable
+- Log all self-modifications to CHANGELOG.md
+- Never store secrets in code — use environment variables
+- Never run the orchestrator without the core loop intact
+  (assess → decide → execute → report → sleep)
+```
 
 ### STRATEGY.md — Initial (agent-editable)
 
@@ -269,7 +362,7 @@ Populated through REFLECT and EVOLVE phases. Tracks: what works, what doesn't, t
 - **Compute:** Claude Code Max subscription (owner's account, installed on Railway server)
 - **Hosting:** Railway (orchestrator + all products the agent builds)
 - **Payments:** Stripe
-- **State:** JSON files persisted on Railway volume
+- **State:** JSON files persisted on Railway volume. State is also committed to git every cycle, so git history serves as the backup. If Railway volume is lost, clone the repo and state is recovered from the last commit.
 - **Budget:** Free tiers for everything. Agent asks via Telegram before any spend.
 
 ## Accounts to Set Up
