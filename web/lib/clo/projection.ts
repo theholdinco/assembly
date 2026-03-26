@@ -38,6 +38,7 @@ export interface ProjectionInputs {
   reinvestmentRating: string | null; // null = use portfolio modal
   cccBucketLimitPct: number; // CCC excess above this % of par is haircut in OC test
   cccMarketValuePct: number; // market value assumption for CCC excess haircut (% of par)
+  deferredInterestCompounds: boolean; // whether PIK'd interest itself earns interest
 }
 
 export interface PeriodResult {
@@ -91,13 +92,18 @@ export function validateInputs(inputs: ProjectionInputs): { field: string; messa
 export function quartersBetween(startIso: string, endIso: string): number {
   const start = new Date(startIso);
   const end = new Date(endIso);
-  const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  const months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + (end.getUTCMonth() - start.getUTCMonth());
   return Math.ceil(months / 3);
 }
 
 export function addQuarters(dateIso: string, quarters: number): string {
   const d = new Date(dateIso);
-  d.setMonth(d.getMonth() + quarters * 3);
+  const origDay = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + quarters * 3);
+  // If the day rolled forward (e.g. Jan 31 + 3mo → May 1), clamp to last day of target month
+  if (d.getUTCDate() !== origDay) {
+    d.setUTCDate(0); // last day of previous month
+  }
   return d.toISOString().slice(0, 10);
 }
 
@@ -116,7 +122,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     reinvestmentPeriodEnd, maturityDate, currentDate,
     loans, defaultRatesByRating, cprPct, recoveryPct, recoveryLagMonths,
     reinvestmentSpreadBps, reinvestmentTenorQuarters, reinvestmentRating: reinvestmentRatingOverride,
-    cccBucketLimitPct, cccMarketValuePct,
+    cccBucketLimitPct, cccMarketValuePct, deferredInterestCompounds,
   } = inputs;
 
   const totalQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : 40;
@@ -166,10 +172,14 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
 
   // Track tranche balances (debt outstanding per tranche)
   const trancheBalances: Record<string, number> = {};
+  // Deferred interest that doesn't compound — tracked separately so it
+  // doesn't earn interest, but IS included in OC denominator and paydown.
+  const deferredBalances: Record<string, number> = {};
   const sortedTranches = [...tranches].sort((a, b) => a.seniorityRank - b.seniorityRank);
   const debtTranches = sortedTranches.filter((t) => !t.isIncomeNote);
   for (const t of sortedTranches) {
     trancheBalances[t.className] = t.currentBalance;
+    deferredBalances[t.className] = 0;
   }
 
   const ocTriggersByClass = ocTriggers;
@@ -359,13 +369,18 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     }
 
     // First pass: pay down from principal proceeds only
+    // Deferred interest on a tranche is paid before its principal.
     let remainingPrelim = prelimPrincipal;
     for (const t of sortedTranches) {
       if (t.isIncomeNote) continue;
-      const paid = Math.min(trancheBalances[t.className], remainingPrelim);
-      trancheBalances[t.className] -= paid;
-      principalPaid[t.className] += paid;
-      remainingPrelim -= paid;
+      // Pay off deferred interest first, then principal
+      const deferredPay = Math.min(deferredBalances[t.className], remainingPrelim);
+      deferredBalances[t.className] -= deferredPay;
+      remainingPrelim -= deferredPay;
+      const principalPay = Math.min(trancheBalances[t.className], remainingPrelim);
+      trancheBalances[t.className] -= principalPay;
+      remainingPrelim -= principalPay;
+      principalPaid[t.className] += deferredPay + principalPay;
     }
 
     // ── 9. Compute OC & IC ratios ────────────────────────────────
@@ -395,7 +410,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     for (const oc of ocTriggersByClass) {
       const debtAtAndAbove = debtTranches
         .filter((t) => t.seniorityRank <= oc.rank)
-        .reduce((s, t) => s + trancheBalances[t.className], 0);
+        .reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
       const actual = debtAtAndAbove > 0 ? (ocNumerator / debtAtAndAbove) * 100 : 999;
       const passing = actual >= oc.triggerLevel;
       ocResults.push({ className: oc.className, actual, trigger: oc.triggerLevel, passing });
@@ -436,8 +451,13 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       if (diverted) {
         trancheInterest.push({ className: t.className, due, paid: 0 });
         // PIK: capitalize unpaid interest onto deferrable tranche balance
-        if (t.isDeferrable && due > 0) {
-          trancheBalances[t.className] += due;
+        // Only if the tranche still has outstanding principal (not fully redeemed)
+        if (t.isDeferrable && due > 0 && bopTrancheBalances[t.className] > 0.01) {
+          if (deferredInterestCompounds) {
+            trancheBalances[t.className] += due;
+          } else {
+            deferredBalances[t.className] += due;
+          }
         }
         continue;
       }
@@ -446,8 +466,13 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       availableInterest -= paid;
       trancheInterest.push({ className: t.className, due, paid });
       // PIK: capitalize any shortfall onto deferrable tranche balance
-      if (t.isDeferrable && paid < due) {
-        trancheBalances[t.className] += (due - paid);
+      if (t.isDeferrable && paid < due && bopTrancheBalances[t.className] > 0.01) {
+        const shortfall = due - paid;
+        if (deferredInterestCompounds) {
+          trancheBalances[t.className] += shortfall;
+        } else {
+          deferredBalances[t.className] += shortfall;
+        }
       }
 
       if (failingOcRanks.has(t.seniorityRank) || failingIcRanks.has(t.seniorityRank)) {
@@ -457,9 +482,13 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
         diverted = true;
         for (const dt of sortedTranches) {
           if (dt.isIncomeNote || diversion <= 0) continue;
+          // Pay deferred interest first, then principal
+          const ddp = Math.min(deferredBalances[dt.className], diversion);
+          deferredBalances[dt.className] -= ddp;
+          diversion -= ddp;
           const dp = Math.min(trancheBalances[dt.className], diversion);
           trancheBalances[dt.className] -= dp;
-          principalPaid[dt.className] += dp;
+          principalPaid[dt.className] += ddp + dp;
           diversion -= dp;
         }
       }
@@ -480,14 +509,14 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
         tranchePrincipal.push({ className: t.className, paid: 0, endBalance: trancheBalances[t.className] });
         continue;
       }
-      tranchePrincipal.push({ className: t.className, paid: principalPaid[t.className], endBalance: trancheBalances[t.className] });
+      tranchePrincipal.push({ className: t.className, paid: principalPaid[t.className], endBalance: trancheBalances[t.className] + deferredBalances[t.className] });
 
-      if (trancheBalances[t.className] <= 0.01 && tranchePayoffQuarter[t.className] === null) {
+      if (trancheBalances[t.className] + deferredBalances[t.className] <= 0.01 && tranchePayoffQuarter[t.className] === null) {
         tranchePayoffQuarter[t.className] = q;
       }
     }
 
-    const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
+    const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
 
     const equityDistribution = equityFromInterest + availablePrincipal;
     totalEquityDistributions += equityDistribution;
@@ -515,7 +544,7 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     });
 
     // Stop early if all debt paid off and collateral is depleted
-    const remainingDebt = debtTranches.reduce((s, t) => s + trancheBalances[t.className], 0);
+    const remainingDebt = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
     if (remainingDebt <= 0.01 && endingPar <= 0.01) break;
   }
 

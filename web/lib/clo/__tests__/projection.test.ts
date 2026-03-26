@@ -55,6 +55,7 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
     reinvestmentRating: null,
     cccBucketLimitPct: 7.5,
     cccMarketValuePct: 70,
+    deferredInterestCompounds: true,
     ...overrides,
   };
 }

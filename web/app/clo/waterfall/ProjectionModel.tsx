@@ -346,11 +346,13 @@ export default function ProjectionModel({
       reinvestmentRating: reinvestmentRating === "auto" ? null : reinvestmentRating,
       cccBucketLimitPct,
       cccMarketValuePct,
+      deferredInterestCompounds: constraints.interestMechanics?.deferredInterestCompounds ?? true,
     }),
     [
       poolSummary, baseRatePct, seniorFeePct, subFeePct, trancheInputs, ocTriggers, icTriggers,
       maturityDate, reinvestmentPeriodEnd, loanInputs, defaultRates, cprPct, recoveryPct, recoveryLagMonths,
       reinvestmentSpreadBps, reinvestmentTenorYears, reinvestmentRating, cccBucketLimitPct, cccMarketValuePct,
+      constraints.interestMechanics?.deferredInterestCompounds,
     ]
   );
 

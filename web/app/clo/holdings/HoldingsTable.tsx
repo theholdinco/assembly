@@ -148,7 +148,7 @@ function ExpandedTable({ holdings }: { holdings: CloHolding[] }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filterText, setFilterText] = useState("");
   const [ratingFilter, setRatingFilter] = useState("");
-  const [countryFilter, setCountryFilter] = useState("");
+  const [industryFilter, setIndustryFilter] = useState("");
   const [visibleKeys, setVisibleKeys] = useState<Set<keyof CloHolding>>(new Set(DEFAULT_VISIBLE_KEYS));
   const [showColumnPicker, setShowColumnPicker] = useState(false);
 
@@ -157,8 +157,8 @@ function ExpandedTable({ holdings }: { holdings: CloHolding[] }) {
     [holdings]
   );
 
-  const countries = useMemo(
-    () => [...new Set(holdings.map((h) => h.country).filter(Boolean) as string[])].sort(),
+  const industries = useMemo(
+    () => [...new Set(holdings.map((h) => h.industryDescription).filter(Boolean) as string[])].sort(),
     [holdings]
   );
 
@@ -176,8 +176,8 @@ function ExpandedTable({ holdings }: { holdings: CloHolding[] }) {
     if (ratingFilter) {
       result = result.filter((h) => h.moodysRating === ratingFilter);
     }
-    if (countryFilter) {
-      result = result.filter((h) => h.country === countryFilter);
+    if (industryFilter) {
+      result = result.filter((h) => h.industryDescription === industryFilter);
     }
     return [...result].sort((a, b) => {
       const av = a[sortKey];
@@ -190,7 +190,7 @@ function ExpandedTable({ holdings }: { holdings: CloHolding[] }) {
       if (bv == null) return -1;
       return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
     });
-  }, [holdings, filterText, ratingFilter, countryFilter, sortKey, sortDir]);
+  }, [holdings, filterText, ratingFilter, industryFilter, sortKey, sortDir]);
 
   function handleSort(key: keyof CloHolding) {
     if (sortKey === key) {
@@ -238,14 +238,14 @@ function ExpandedTable({ holdings }: { holdings: CloHolding[] }) {
           ))}
         </select>
         <select
-          value={countryFilter}
-          onChange={(e) => setCountryFilter(e.target.value)}
+          value={industryFilter}
+          onChange={(e) => setIndustryFilter(e.target.value)}
           className="ic-textarea"
-          style={{ padding: "0.4rem 0.6rem", fontSize: "0.85rem", maxWidth: "150px" }}
+          style={{ padding: "0.4rem 0.6rem", fontSize: "0.85rem", maxWidth: "200px" }}
         >
-          <option value="">All Countries</option>
-          {countries.map((c) => (
-            <option key={c} value={c}>{c}</option>
+          <option value="">All Industries</option>
+          {industries.map((ind) => (
+            <option key={ind} value={ind}>{ind}</option>
           ))}
         </select>
         <div style={{ position: "relative" }}>
