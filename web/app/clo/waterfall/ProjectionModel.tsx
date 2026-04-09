@@ -896,36 +896,6 @@ function SelectInput({
   );
 }
 
-function DisclosureItem({ label, detail }: { label: string; detail: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: "0.5rem",
-        padding: "0.4rem 0",
-        borderTop: "1px solid var(--color-border-light)",
-        fontSize: "0.75rem",
-        lineHeight: 1.4,
-      }}
-    >
-      <span
-        style={{
-          flexShrink: 0,
-          width: "0.35rem",
-          height: "0.35rem",
-          marginTop: "0.35rem",
-          borderRadius: "50%",
-          background: "var(--color-text-muted)",
-        }}
-      />
-      <div>
-        <span style={{ fontWeight: 600 }}>{label}:</span>{" "}
-        <span style={{ color: "var(--color-text-muted)" }}>{detail}</span>
-      </div>
-    </div>
-  );
-}
-
 function AssumptionItem({ label, detail, impact }: { label: string; detail: string; impact: AssumptionImpact }) {
   const dotColor = impact === "high" ? "var(--color-low)" : impact === "medium" ? "var(--color-warning, #d97706)" : "var(--color-text-muted)";
   return (
