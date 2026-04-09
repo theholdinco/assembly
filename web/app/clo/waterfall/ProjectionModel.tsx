@@ -13,13 +13,12 @@ import type {
 import {
   runProjection,
   validateInputs,
-  addQuarters,
   type ProjectionInputs,
   type ProjectionResult,
   type LoanInput,
 } from "@/lib/clo/projection";
 import type { ResolvedDealData, ResolutionWarning } from "@/lib/clo/resolver-types";
-import { mapToRatingBucket, DEFAULT_RATES_BY_RATING, RATING_BUCKETS, type RatingBucket } from "@/lib/clo/rating-mapping";
+import { DEFAULT_RATES_BY_RATING, RATING_BUCKETS, type RatingBucket } from "@/lib/clo/rating-mapping";
 import SuggestAssumptions from "./SuggestAssumptions";
 
 interface Props {
@@ -119,66 +118,6 @@ const MODEL_SIMPLIFICATIONS = [
   },
 ];
 
-function parseAmount(s: string | undefined | null): number {
-  if (!s) return 0;
-  const cleaned = s.replace(/[^0-9.]/g, "");
-  return parseFloat(cleaned) || 0;
-}
-
-// Parse spread string like "EURIBOR + 1.47%", "3.50%", "E+150bps", "5.50% fixed" → bps
-function parseSpreadBps(spreadBps: number | undefined | null, spreadStr: string | undefined | null): number {
-  if (spreadBps != null && spreadBps > 0) return spreadBps;
-  if (!spreadStr) return 0;
-  // Try to find a percentage: "1.47%", "+ 0.50%", "5.50% fixed"
-  const pctMatch = spreadStr.match(/([\d.]+)\s*%/);
-  if (pctMatch) {
-    const pct = parseFloat(pctMatch[1]);
-    if (pct > 0) return Math.round(pct * 100);
-  }
-  // Try bps directly: "150bps", "150 bps"
-  const bpsMatch = spreadStr.match(/([\d.]+)\s*bps/i);
-  if (bpsMatch) return parseFloat(bpsMatch[1]) || 0;
-  // Plain number: treat as bps if >= 1, percentage if < 1
-  const plain = parseFloat(spreadStr);
-  if (!isNaN(plain) && plain > 0) return plain >= 1 ? Math.round(plain) : Math.round(plain * 10000);
-  return 0;
-}
-
-function buildTranchesFromConstraints(constraints: ExtractedConstraints) {
-  const entries = constraints.capitalStructure ?? [];
-  if (entries.length === 0) return [];
-
-  // Deduplicate by class name — keep the entry with the most data (has principalAmount and spread)
-  const byClass = new Map<string, typeof entries[number]>();
-  for (const e of entries) {
-    const existing = byClass.get(e.class);
-    if (!existing || (parseAmount(e.principalAmount) > 0 && (!existing.principalAmount || parseAmount(existing.principalAmount) === 0))) {
-      byClass.set(e.class, e);
-    }
-  }
-
-  const classXAmort = constraints.dealSizing?.classXAmortisation;
-  const classXAmortPerQuarter = classXAmort ? parseAmount(classXAmort) : null;
-
-  return Array.from(byClass.values()).map((e, idx) => {
-    const isSubordinated = e.isSubordinated ?? e.class.toLowerCase().includes("sub");
-    const isFloating = e.rateType?.toLowerCase().includes("float") ??
-      (e.spread?.toLowerCase().includes("euribor") || e.spread?.toLowerCase().includes("sofr") || false);
-    const isClassX = /^(class\s+)?x$/i.test(e.class.trim());
-    return {
-      className: e.class,
-      currentBalance: parseAmount(e.principalAmount),
-      spreadBps: parseSpreadBps(e.spreadBps, e.spread),
-      seniorityRank: idx + 1,
-      isFloating,
-      isIncomeNote: isSubordinated,
-      isDeferrable: e.deferrable ?? false,
-      isAmortising: isClassX,
-      amortisationPerPeriod: isClassX ? classXAmortPerQuarter : null,
-    };
-  });
-}
-
 function buildFromResolved(
   resolved: ResolvedDealData,
   userAssumptions: {
@@ -253,126 +192,9 @@ export default function ProjectionModel({
   resolved,
   resolutionWarnings,
 }: Props) {
-  const isOcTest = (t: { testType?: string | null; testName?: string | null }) => {
-    if (t.testType === "OC_PAR" || t.testType === "OC_MV") return true;
-    const name = (t.testName ?? "").toLowerCase();
-    return name.includes("overcollateral") || name.includes("par value") || (name.includes("oc") && name.includes("ratio"));
-  };
-  const isIcTest = (t: { testType?: string | null; testName?: string | null }) => {
-    if (t.testType === "IC") return true;
-    const name = (t.testName ?? "").toLowerCase();
-    return name.includes("interest coverage") || (name.includes("ic") && name.includes("ratio"));
-  };
-
-  // Deduplicate triggers by className — keep highest triggerLevel (most conservative)
-  function dedupTriggers(triggers: { className: string; triggerLevel: number }[]) {
-    const byClass = new Map<string, { className: string; triggerLevel: number }>();
-    for (const t of triggers) {
-      const existing = byClass.get(t.className);
-      if (!existing || t.triggerLevel > existing.triggerLevel) {
-        byClass.set(t.className, t);
-      }
-    }
-    return Array.from(byClass.values());
-  }
-
-  const ocTriggersRaw = useMemo(() => {
-    const fromTests = complianceTests
-      .filter((t) => isOcTest(t) && t.triggerLevel !== null && t.testClass)
-      .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
-    const raw = fromTests.length > 0
-      ? fromTests
-      : (constraints.coverageTestEntries ?? [])
-          .filter((e) => e.class && e.parValueRatio && parseFloat(e.parValueRatio))
-          .map((e) => ({ className: e.class!, triggerLevel: parseFloat(e.parValueRatio!) }));
-    return dedupTriggers(raw);
-  }, [complianceTests, constraints]);
-
-  const icTriggersRaw = useMemo(() => {
-    const fromTests = complianceTests
-      .filter((t) => isIcTest(t) && t.triggerLevel !== null && t.testClass)
-      .map((t) => ({ className: t.testClass!, triggerLevel: t.triggerLevel! }));
-    const raw = fromTests.length > 0
-      ? fromTests
-      : (constraints.coverageTestEntries ?? [])
-          .filter((e) => e.class && e.interestCoverageRatio && parseFloat(e.interestCoverageRatio))
-          .map((e) => ({ className: e.class!, triggerLevel: parseFloat(e.interestCoverageRatio!) }));
-    return dedupTriggers(raw);
-  }, [complianceTests, constraints]);
-
-  const trancheInputs = useMemo(() => {
-    if (tranches.length > 0) {
-      const snapshotByTrancheId = new Map(trancheSnapshots.map((s) => [s.trancheId, s]));
-      const classXAmort = constraints.dealSizing?.classXAmortisation;
-      const classXAmortPerQuarter = classXAmort ? parseAmount(classXAmort) : null;
-      // Build a lookup from PPM constraints to fill in missing spreadBps from DB tranches.
-      // Normalize class names: "Class A", "A", "Class A Notes" all map to "a".
-      const normClass = (s: string) => s.replace(/^class\s+/i, "").replace(/\s+notes?$/i, "").trim().toLowerCase();
-      const ppmSpreadByClass = new Map<string, number>();
-      for (const e of constraints.capitalStructure ?? []) {
-        const bps = parseSpreadBps(e.spreadBps, e.spread);
-        if (bps > 0) ppmSpreadByClass.set(normClass(e.class), bps);
-      }
-      return [...tranches]
-        .sort((a, b) => (a.seniorityRank ?? 99) - (b.seniorityRank ?? 99))
-        .map((t) => {
-          const snap = snapshotByTrancheId.get(t.id);
-          const isClassX = /^(class\s+)?x$/i.test(t.className.trim());
-          return {
-            className: t.className,
-            currentBalance: snap?.currentBalance ?? t.originalBalance ?? 0,
-            spreadBps: t.spreadBps ?? ppmSpreadByClass.get(normClass(t.className)) ?? 0,
-            seniorityRank: t.seniorityRank ?? 99,
-            isFloating: t.isFloating ?? true,
-            isIncomeNote: t.isIncomeNote ?? t.isSubordinate ?? t.className.toLowerCase().includes("sub") ?? false,
-            isDeferrable: t.isDeferrable ?? false,
-            isAmortising: isClassX,
-            amortisationPerPeriod: isClassX ? classXAmortPerQuarter : null,
-          };
-        });
-    }
-    return buildTranchesFromConstraints(constraints);
-  }, [tranches, trancheSnapshots, constraints]);
-
-  // Resolve a single class letter (e.g. "B", "D-RR") to a tranche seniority rank
-  function resolveOneClass(cls: string): number {
-    // Strip "-RR" suffix for matching (e.g. "D-RR" → match "Class D" or "D")
-    const base = cls.replace(/-RR$/i, "");
-    // 1. Exact match
-    const exact = trancheInputs.find((t) => t.className === cls || t.className === base);
-    if (exact) return exact.seniorityRank;
-    // 2. Prefix match: "B" matches "Class B", "Class B-1", "B-2", etc.
-    const prefixMatches = trancheInputs.filter(
-      (t) =>
-        t.className.startsWith(`Class ${base}`) ||
-        t.className.startsWith(`${base}-`) ||
-        t.className.toUpperCase() === `CLASS ${base.toUpperCase()}`
-    );
-    if (prefixMatches.length > 0) {
-      // Use most senior rank (lowest number) — debt sum naturally includes all via rank filter
-      return Math.min(...prefixMatches.map((t) => t.seniorityRank));
-    }
-    return 0; // unmapped
-  }
-
-  // Resolve trigger class names → tranche seniority ranks
-  // Handles compound classes like "A/B" (split on /, use most junior = highest rank)
-  function resolveRank(triggerClass: string): number {
-    const parts = triggerClass.split("/");
-    const ranks = parts.map(resolveOneClass).filter((r) => r > 0);
-    if (ranks.length === 0) return 0; // unmapped
-    // For compound "A/B", the OC test protects at-and-above the most junior class
-    return Math.max(...ranks);
-  }
-
-  const ocTriggers = useMemo(
-    () => ocTriggersRaw.map((oc) => ({ ...oc, rank: resolveRank(oc.className) })),
-    [ocTriggersRaw, trancheInputs]
-  );
-  const icTriggers = useMemo(
-    () => icTriggersRaw.map((ic) => ({ ...ic, rank: resolveRank(ic.className) })),
-    [icTriggersRaw, trancheInputs]
-  );
+  const trancheInputs = resolved?.tranches ?? [];
+  const ocTriggers = resolved?.ocTriggers ?? [];
+  const icTriggers = resolved?.icTriggers ?? [];
   const unmappedOc = ocTriggers.filter((oc) => oc.rank === 0);
   const unmappedIc = icTriggers.filter((ic) => ic.rank === 0);
 
@@ -390,17 +212,7 @@ export default function ProjectionModel({
   const [cccMarketValuePct, setCccMarketValuePct] = useState(70);
   const [showCashFlows, setShowCashFlows] = useState(false);
 
-  const loanInputs: LoanInput[] = useMemo(() => {
-    const fallbackMaturity = maturityDate ?? addQuarters(new Date().toISOString().slice(0, 10), 40);
-    return holdings
-      .filter((h) => h.parBalance && h.parBalance > 0 && !h.isDefaulted)
-      .map((h) => ({
-        parBalance: h.parBalance!,
-        maturityDate: h.maturityDate ?? fallbackMaturity,
-        ratingBucket: mapToRatingBucket(h.moodysRating ?? null, h.spRating ?? null, h.fitchRating ?? null, h.compositeRating ?? null),
-        spreadBps: h.spreadBps ?? (poolSummary?.wacSpread ? (poolSummary.wacSpread < 20 ? poolSummary.wacSpread * 100 : poolSummary.wacSpread) : 0),
-      }));
-  }, [holdings, maturityDate, poolSummary]);
+  const loanInputs: LoanInput[] = resolved?.loans ?? [];
 
   const ratingDistribution = useMemo(() => {
     const dist: Record<string, { count: number; par: number }> = {};
@@ -425,53 +237,49 @@ export default function ProjectionModel({
 
   const inputs: ProjectionInputs = useMemo(
     () => {
-      if (resolved) {
-        return buildFromResolved(resolved, {
+      if (!resolved) {
+        // Safe default that will fail validation rather than crash
+        return {
+          initialPar: 0,
+          wacSpreadBps: 0,
           baseRatePct,
-          defaultRates: defaultRates,
+          seniorFeePct: 0,
+          subFeePct: 0,
+          tranches: [],
+          ocTriggers: [],
+          icTriggers: [],
+          reinvestmentPeriodEnd: null,
+          maturityDate: null,
+          currentDate: new Date().toISOString().slice(0, 10),
+          loans: [],
+          defaultRatesByRating: defaultRates,
           cprPct,
           recoveryPct,
           recoveryLagMonths,
           reinvestmentSpreadBps,
-          reinvestmentTenorYears,
-          reinvestmentRating: reinvestmentRating === "auto" ? null : reinvestmentRating,
+          reinvestmentTenorQuarters: reinvestmentTenorYears * 4,
+          reinvestmentRating: null,
           cccBucketLimitPct,
           cccMarketValuePct,
-          deferredInterestCompounds: constraints.interestMechanics?.deferredInterestCompounds ?? true,
-        });
+          deferredInterestCompounds: true,
+        };
       }
-      // Legacy fallback — existing assembly logic
-      return {
-        initialPar: poolSummary?.totalPar ?? 0,
-        wacSpreadBps: (() => {
-          const was = poolSummary?.wacSpread ?? 0;
-          return was < 20 ? was * 100 : was;
-        })(),
+      return buildFromResolved(resolved, {
         baseRatePct,
-        seniorFeePct,
-        subFeePct,
-        tranches: trancheInputs,
-        ocTriggers,
-        icTriggers,
-        reinvestmentPeriodEnd,
-        maturityDate,
-        currentDate: new Date().toISOString().slice(0, 10),
-        loans: loanInputs,
-        defaultRatesByRating: defaultRates,
+        defaultRates: defaultRates,
         cprPct,
         recoveryPct,
         recoveryLagMonths,
         reinvestmentSpreadBps,
-        reinvestmentTenorQuarters: reinvestmentTenorYears * 4,
+        reinvestmentTenorYears,
         reinvestmentRating: reinvestmentRating === "auto" ? null : reinvestmentRating,
         cccBucketLimitPct,
         cccMarketValuePct,
         deferredInterestCompounds: constraints.interestMechanics?.deferredInterestCompounds ?? true,
-      };
+      });
     },
     [
-      resolved, poolSummary, baseRatePct, seniorFeePct, subFeePct, trancheInputs, ocTriggers, icTriggers,
-      maturityDate, reinvestmentPeriodEnd, loanInputs, defaultRates, cprPct, recoveryPct, recoveryLagMonths,
+      resolved, baseRatePct, defaultRates, cprPct, recoveryPct, recoveryLagMonths,
       reinvestmentSpreadBps, reinvestmentTenorYears, reinvestmentRating, cccBucketLimitPct, cccMarketValuePct,
       constraints.interestMechanics?.deferredInterestCompounds,
     ]
