@@ -145,12 +145,6 @@ function buildFromResolved(
     callDate: string | null;
   },
 ): ProjectionInputs {
-  // Build reinvestment OC trigger from the most junior OC test (typically Class F)
-  const sortedOc = [...resolved.ocTriggers].sort((a, b) => b.rank - a.rank);
-  const reinvestmentOcTrigger = sortedOc.length > 0
-    ? { triggerLevel: sortedOc[0].triggerLevel, rank: sortedOc[0].rank }
-    : null;
-
   return {
     initialPar: resolved.poolSummary.totalPar,
     wacSpreadBps: resolved.poolSummary.wacSpreadBps,
@@ -163,7 +157,7 @@ function buildFromResolved(
     incentiveFeeHurdleIrr: resolved.fees.incentiveFeeHurdleIrr,
     postRpReinvestmentPct: userAssumptions.postRpReinvestmentPct,
     callDate: userAssumptions.callDate,
-    reinvestmentOcTrigger,
+    reinvestmentOcTrigger: resolved.reinvestmentOcTrigger,
     tranches: resolved.tranches.map(t => ({
       className: t.className,
       currentBalance: t.currentBalance,

@@ -1,8 +1,14 @@
+export interface ResolvedReinvestmentOcTrigger {
+  triggerLevel: number;
+  rank: number;
+}
+
 export interface ResolvedDealData {
   tranches: ResolvedTranche[];
   poolSummary: ResolvedPool;
   ocTriggers: ResolvedTrigger[];
   icTriggers: ResolvedTrigger[];
+  reinvestmentOcTrigger: ResolvedReinvestmentOcTrigger | null;
   dates: ResolvedDates;
   fees: ResolvedFees;
   loans: ResolvedLoan[];

@@ -1,5 +1,5 @@
 import type { ExtractedConstraints, CloPoolSummary, CloComplianceTest, CloTranche, CloTrancheSnapshot, CloHolding } from "./types";
-import type { ResolvedDealData, ResolvedTranche, ResolvedPool, ResolvedTrigger, ResolvedDates, ResolvedFees, ResolvedLoan, ResolutionWarning } from "./resolver-types";
+import type { ResolvedDealData, ResolvedTranche, ResolvedPool, ResolvedTrigger, ResolvedReinvestmentOcTrigger, ResolvedDates, ResolvedFees, ResolvedLoan, ResolutionWarning } from "./resolver-types";
 import { parseSpreadToBps, normalizeWacSpread } from "./ingestion-gate";
 import { mapToRatingBucket } from "./rating-mapping";
 
@@ -265,8 +265,11 @@ export function resolveWaterfallInputs(
     const existingIdx = seenClasses.get(key);
     if (existingIdx != null) {
       const existing = tranches[existingIdx];
-      // Keep whichever has the better seniority rank (lower = more authoritative)
-      if (t.seniorityRank < existing.seniorityRank) {
+      // Prefer snapshot > db_tranche > ppm (snapshot has current balances)
+      const sourcePriority: Record<string, number> = { snapshot: 3, db_tranche: 2, ppm: 1, manual: 4 };
+      const tPrio = sourcePriority[t.source] ?? 0;
+      const ePrio = sourcePriority[existing.source] ?? 0;
+      if (tPrio > ePrio || (tPrio === ePrio && t.seniorityRank < existing.seniorityRank)) {
         tranches[existingIdx] = t;
       }
       warnings.push({
@@ -323,6 +326,24 @@ export function resolveWaterfallInputs(
   // --- Fees ---
   const fees = resolveFees(constraints, warnings);
 
+  // --- Reinvestment OC Trigger ---
+  // Resolved from PPM's reinvestmentOcTest field, with fallback to the most junior OC test
+  let reinvestmentOcTrigger: ResolvedReinvestmentOcTrigger | null = null;
+  const reinvOcRaw = constraints.reinvestmentOcTest;
+  if (reinvOcRaw?.trigger) {
+    const triggerLevel = parseFloat(reinvOcRaw.trigger);
+    if (!isNaN(triggerLevel) && triggerLevel > 0) {
+      // Use the most junior OC test rank (typically Class F)
+      const sortedOc = [...ocTriggers].sort((a, b) => b.rank - a.rank);
+      reinvestmentOcTrigger = { triggerLevel, rank: sortedOc[0]?.rank ?? 99 };
+    }
+  }
+  if (!reinvestmentOcTrigger && ocTriggers.length > 0) {
+    // Fallback: derive from the most junior OC trigger
+    const sortedOc = [...ocTriggers].sort((a, b) => b.rank - a.rank);
+    reinvestmentOcTrigger = { triggerLevel: sortedOc[0].triggerLevel, rank: sortedOc[0].rank };
+  }
+
   // --- Loans ---
   const fallbackMaturity = maturity ?? "2037-01-01";
   const loans: ResolvedLoan[] = holdings
@@ -335,7 +356,7 @@ export function resolveWaterfallInputs(
     }));
 
   return {
-    resolved: { tranches, poolSummary, ocTriggers, icTriggers, dates, fees, loans },
+    resolved: { tranches, poolSummary, ocTriggers, icTriggers, reinvestmentOcTrigger, dates, fees, loans },
     warnings,
   };
 }

@@ -345,11 +345,8 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     // Update currentPar from loan states or fallback
     if (hasLoans) {
       currentPar = loanStates.reduce((s, l) => s + l.survivingPar, 0);
-      if (inRP) {
-        // currentPar already includes reinvested loans
-      }
     } else {
-      if (inRP) {
+      if (reinvestment > 0) {
         currentPar += reinvestment;
       }
     }
@@ -423,7 +420,9 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     // Adjusted Collateral Principal Amount = ending par + principal account cash
     // + recovery value of defaulted-but-pending securities - CCC excess haircut
     // Principal account cash: uninvested principal sitting in accounts (remainingPrelim)
-    const pendingRecoveryValue = recoveryPipeline
+    // At maturity, all pending recoveries are already accelerated into `recoveries` (and thus
+    // into prelimPrincipal/remainingPrelim), so don't count them again in the OC numerator.
+    const pendingRecoveryValue = isMaturity ? 0 : recoveryPipeline
       .filter((r) => r.quarter > q)
       .reduce((s, r) => s + r.amount, 0);
     let ocNumerator = endingPar + remainingPrelim + pendingRecoveryValue;

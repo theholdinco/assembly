@@ -14,9 +14,10 @@ export function parseSpreadToBps(spreadBps: number | undefined | null, spreadStr
   const bpsMatch = spreadStr.match(/([\d.]+)\s*bps/i);
   if (bpsMatch) return Math.round(parseFloat(bpsMatch[1]));
 
+  // Plain number: >= 10 is bps (e.g. "150"), < 10 is likely percentage (e.g. "1.47" = 147bps)
   const plain = parseFloat(spreadStr);
   if (!isNaN(plain) && plain > 0) {
-    return plain >= 1 ? Math.round(plain) : Math.round(plain * 10000);
+    return plain >= 10 ? Math.round(plain) : Math.round(plain * 100);
   }
 
   return null;
