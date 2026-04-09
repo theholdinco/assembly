@@ -5,6 +5,9 @@ import {
   getDealForProfile,
   getLatestReportPeriod,
   getReportPeriodData,
+  getTranches,
+  getTrancheSnapshots,
+  getHoldings,
   rowToProfile,
 } from "@/lib/clo/access";
 import type { ExtractedConstraints, CloDocument } from "@/lib/clo/types";
@@ -43,19 +46,29 @@ export default async function ContextPage() {
 
   let complianceData = null;
   const deal = await getDealForProfile(profile.id);
-  if (deal) {
-    const latestPeriod = await getLatestReportPeriod(deal.id);
-    if (latestPeriod) {
-      const periodData = await getReportPeriodData(latestPeriod.id);
-      complianceData = {
-        reportPeriodId: latestPeriod.id,
-        reportDate: latestPeriod.reportDate,
-        poolSummary: periodData.poolSummary,
-        complianceTests: periodData.complianceTests,
-        concentrations: periodData.concentrations,
-      };
-    }
+  const reportPeriod = deal ? await getLatestReportPeriod(deal.id) : null;
+
+  const [tranches, trancheSnapshots, holdings, periodData] = await Promise.all([
+    deal ? getTranches(deal.id) : Promise.resolve([]),
+    reportPeriod ? getTrancheSnapshots(reportPeriod.id) : Promise.resolve([]),
+    reportPeriod ? getHoldings(reportPeriod.id) : Promise.resolve([]),
+    reportPeriod ? getReportPeriodData(reportPeriod.id) : Promise.resolve(null),
+  ]);
+
+  if (reportPeriod && periodData) {
+    complianceData = {
+      reportPeriodId: reportPeriod.id,
+      reportDate: reportPeriod.reportDate,
+      poolSummary: periodData.poolSummary,
+      complianceTests: periodData.complianceTests,
+      concentrations: periodData.concentrations,
+    };
   }
+
+  const maturityDate =
+    deal?.statedMaturityDate ?? constraints.keyDates?.maturityDate ?? null;
+  const reinvestmentPeriodEnd =
+    deal?.reinvestmentPeriodEnd ?? constraints.keyDates?.reinvestmentPeriodEnd ?? null;
 
   return (
     <div className="ic-content">
@@ -106,6 +119,10 @@ export default async function ContextPage() {
         constraints={constraints}
         fundProfile={fundProfile}
         complianceData={complianceData}
+        tranches={tranches}
+        trancheSnapshots={trancheSnapshots}
+        holdings={holdings}
+        dealDates={{ maturity: maturityDate, reinvestmentPeriodEnd }}
       />
     </div>
   );
