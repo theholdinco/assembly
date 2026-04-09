@@ -411,10 +411,10 @@ CLO FEE STRUCTURE:
 - "Senior Expenses Cap" is a hard cap on total annual non-CM expenses (typically €350,000–€500,000).
 - The Trustee fee is paid under "Agency and Account Bank Agreement".
 
-Extract ALL fees: name, rate, basis, description.
+Extract ALL fees: name, rate, basis, description, hurdleRate.
 
 Additional CLO fees to look for:
-- Incentive Management Fee / Performance Fee
+- Incentive Management Fee / Performance Fee — for this fee, also extract the hurdleRate (the IRR threshold above which the fee applies, e.g. "12%")
 - Administrative Expenses / Administrative Expense Cap
 - Arrangement Fee
 - Placement Fee
@@ -425,6 +425,7 @@ Fees may be expressed as:
 - Basis points per annum on collateral balance (e.g., "0.15% per annum")
 - Fixed amounts per payment period
 - Percentage of interest/principal proceeds
+- For incentive fees: "X% of residual above Y% IRR threshold" — extract X as rate and Y as hurdleRate
 
 Extract account definitions: name, purpose.
 Common accounts: Payment Account, Collection Account, Principal Account, Interest Account, Reserve Account, Expense Account, Custody Account, Hedge Counterparty Collateral Account.

@@ -233,13 +233,13 @@ function resolveFees(constraints: ExtractedConstraints, warnings: ResolutionWarn
       trusteeFeeBps = rate;
     } else if (name.includes("incentive") || name.includes("performance")) {
       incentiveFeePct = rate;
-      // Try to extract IRR hurdle from description/basis (e.g. "Above 12% IRR threshold")
-      const desc = (fee.description ?? fee.basis ?? "").toLowerCase();
-      const hurdleMatch = desc.match(/(\d+(?:\.\d+)?)\s*%/);
-      if (hurdleMatch) {
-        incentiveFeeHurdleIrr = parseFloat(hurdleMatch[1]) / 100;
+      // Use the LLM-extracted hurdleRate field
+      const hurdleRaw = parseFloat(fee.hurdleRate ?? "");
+      if (!isNaN(hurdleRaw) && hurdleRaw > 0) {
+        // hurdleRate is extracted as percentage string (e.g. "12" or "12%")
+        incentiveFeeHurdleIrr = hurdleRaw > 1 ? hurdleRaw / 100 : hurdleRaw;
       } else if (incentiveFeePct > 0) {
-        // If incentive fee found but no hurdle, use typical 12% European CLO hurdle
+        // If incentive fee found but no hurdle extracted, use typical 12% European CLO hurdle
         incentiveFeeHurdleIrr = 0.12;
       }
     }

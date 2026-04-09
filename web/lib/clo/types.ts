@@ -79,6 +79,7 @@ export interface FeeEntry {
   rate?: string;
   basis?: string;
   description?: string;
+  hurdleRate?: string; // For incentive/performance fees: the IRR hurdle threshold (e.g. "12%")
 }
 
 export interface KeyParty {

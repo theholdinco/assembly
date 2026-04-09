@@ -107,6 +107,7 @@ export const extractedConstraintsSchema = z.object({
     rate: z.string().optional(),
     basis: z.string().optional(),
     description: z.string().optional(),
+    hurdleRate: z.string().nullable().optional(),
   }).passthrough()).optional(),
 
   accounts: z.array(z.object({
