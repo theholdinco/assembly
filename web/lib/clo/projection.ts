@@ -619,18 +619,26 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     const subFeeAmount = beginningPar * (subFeePct / 100) / 4;
     availableInterest -= Math.min(subFeeAmount, availableInterest);
 
-    // PPM Step BB: Incentive management fee — % of residual above IRR hurdle
-    // Simplified: applied as flat % of equity residual each period when the hurdle
-    // is met. A full implementation would track cumulative IRR vs hurdle, but since
-    // we use constant assumptions the hurdle is either always met or never met.
-    // We check: if hurdle is 0 (no hurdle), always apply; otherwise estimate if
-    // the deal is performing above hurdle based on cumulative equity yield.
-    const incentiveFeeApplies = incentiveFeePct > 0 && (
-      incentiveFeeHurdleIrr <= 0 ||
-      (equityInvestment > 0 && totalEquityDistributions / equityInvestment > incentiveFeeHurdleIrr * (q / 4))
-    );
-    if (incentiveFeeApplies && availableInterest > 0) {
-      availableInterest -= availableInterest * (incentiveFeePct / 100);
+    // PPM Step BB: Incentive management fee — % of residual ABOVE IRR hurdle.
+    // The CM gets incentiveFeePct% (e.g. 20%) only on equity distributions that
+    // exceed the cumulative hurdle return. The hurdle amount at time t =
+    // equityInvestment * ((1 + hurdleIRR)^t - 1), i.e. what equity holders
+    // would have earned at exactly the hurdle IRR.
+    //
+    // Per period: compute pre-fee distribution, check if cumulative distributions
+    // (including this period) exceed the hurdle, take fee only on the excess.
+    let incentiveFeeFromInterest = 0;
+    if (incentiveFeePct > 0 && equityInvestment > 0 && availableInterest > 0) {
+      const yearsElapsed = q / 4;
+      const hurdleAmount = incentiveFeeHurdleIrr > 0
+        ? equityInvestment * (Math.pow(1 + incentiveFeeHurdleIrr, yearsElapsed) - 1)
+        : 0;
+      const cumulativeWithThis = totalEquityDistributions + availableInterest;
+      const excessAboveHurdle = Math.max(0, cumulativeWithThis - hurdleAmount);
+      // Only charge against this period's distribution (not prior periods)
+      const feeableThisPeriod = Math.min(excessAboveHurdle, availableInterest);
+      incentiveFeeFromInterest = feeableThisPeriod * (incentiveFeePct / 100);
+      availableInterest -= incentiveFeeFromInterest;
     }
 
     const equityFromInterest = availableInterest;
@@ -653,9 +661,19 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
 
     const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
 
-    // PPM Step U: Incentive fee from principal proceeds
-    if (incentiveFeeApplies && availablePrincipal > 0) {
-      availablePrincipal -= availablePrincipal * (incentiveFeePct / 100);
+    // PPM Step U: Incentive fee from principal proceeds (same hurdle logic)
+    let incentiveFeeFromPrincipal = 0;
+    if (incentiveFeePct > 0 && equityInvestment > 0 && availablePrincipal > 0) {
+      const yearsElapsed = q / 4;
+      const hurdleAmount = incentiveFeeHurdleIrr > 0
+        ? equityInvestment * (Math.pow(1 + incentiveFeeHurdleIrr, yearsElapsed) - 1)
+        : 0;
+      // Include interest-side equity already counted this period
+      const cumulativeWithThis = totalEquityDistributions + equityFromInterest + availablePrincipal;
+      const excessAboveHurdle = Math.max(0, cumulativeWithThis - hurdleAmount);
+      const feeableThisPeriod = Math.min(excessAboveHurdle, availablePrincipal);
+      incentiveFeeFromPrincipal = feeableThisPeriod * (incentiveFeePct / 100);
+      availablePrincipal -= incentiveFeeFromPrincipal;
     }
 
     const equityDistribution = equityFromInterest + availablePrincipal;
