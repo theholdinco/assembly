@@ -608,8 +608,50 @@ export default function ContextEditor({
   const accountRows = asArray<{ name: string; purpose: string }>(constraints.accounts);
   const keyPartyRows = asArray<KeyParty>(constraints.keyParties);
 
+  function exportContext() {
+    const data = { constraints, fundProfile, complianceData };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "clo-context.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importContext(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string);
+        if (data.constraints) { setConstraints(data.constraints); setConstraintsDirty(true); }
+        if (data.fundProfile) { setFundProfile(data.fundProfile); setProfileDirty(true); }
+        if (data.complianceData) { setComplianceData(data.complianceData); setComplianceDirty(true); }
+      } catch { /* ignore parse errors */ }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div style={{ maxWidth: "64rem" }}>
+
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+        <button
+          onClick={exportContext}
+          style={{ ...saveBtnStyle, background: "var(--color-surface)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+        >
+          Export JSON
+        </button>
+        <label style={{ ...saveBtnStyle, background: "var(--color-surface)", color: "var(--color-text)", border: "1px solid var(--color-border)", cursor: "pointer" }}>
+          Import JSON
+          <input
+            type="file"
+            accept=".json"
+            style={{ display: "none" }}
+            onChange={(e) => { if (e.target.files?.[0]) importContext(e.target.files[0]); }}
+          />
+        </label>
+      </div>
 
       {/* ================================================================= */}
       {/* GROUP 1: Compliance & Tests                                       */}
