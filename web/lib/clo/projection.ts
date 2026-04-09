@@ -14,6 +14,13 @@ export interface ProjectionInputs {
   baseRatePct: number;
   seniorFeePct: number;
   subFeePct: number;
+  trusteeFeeBps: number; // Trustee + admin expenses (PPM Steps A-D), in bps p.a. on collateral par
+  hedgeCostBps: number; // Scheduled hedge payments (PPM Step F), in bps p.a. on collateral par
+  incentiveFeePct: number; // % of residual above IRR hurdle (PPM Steps BB/U), e.g. 20
+  incentiveFeeHurdleIrr: number; // annualized IRR hurdle, e.g. 0.12 for 12%
+  postRpReinvestmentPct: number; // % of principal proceeds reinvested post-RP (0-100, typically 0-50)
+  callDate: string | null; // optional redemption date — if set, projection stops here and liquidates
+  reinvestmentOcTrigger: { triggerLevel: number; rank: number } | null; // Reinvestment OC test (50% diversion during RP)
   tranches: {
     className: string;
     currentBalance: number;
@@ -111,15 +118,17 @@ export function addQuarters(dateIso: string, quarters: number): string {
 
 // Helper: compute tranche coupon rate as a decimal
 function trancheCouponRate(t: ProjectionInputs["tranches"][number], baseRatePct: number): number {
-  // Floating: base rate + spread. Fixed: spread represents the full coupon.
+  // Floating: base rate (floored at 0%) + spread. Fixed: spread represents the full coupon.
   return t.isFloating
-    ? (baseRatePct + t.spreadBps / 100) / 100
+    ? (Math.max(0, baseRatePct) + t.spreadBps / 100) / 100
     : t.spreadBps / 10000;
 }
 
 export function runProjection(inputs: ProjectionInputs): ProjectionResult {
   const {
     initialPar, wacSpreadBps, baseRatePct, seniorFeePct, subFeePct,
+    trusteeFeeBps, hedgeCostBps, incentiveFeePct, incentiveFeeHurdleIrr,
+    postRpReinvestmentPct, callDate, reinvestmentOcTrigger,
     tranches, ocTriggers, icTriggers,
     reinvestmentPeriodEnd, maturityDate, currentDate,
     loans, defaultRatesByRating, cprPct, recoveryPct, recoveryLagMonths,
@@ -127,7 +136,10 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     cccBucketLimitPct, cccMarketValuePct, deferredInterestCompounds,
   } = inputs;
 
-  const totalQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : 40;
+  const maturityQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : 40;
+  // If a call date is set, the projection ends at the earlier of call or maturity
+  const callQuarters = callDate ? Math.max(1, quartersBetween(currentDate, callDate)) : null;
+  const totalQuarters = callQuarters ? Math.min(callQuarters, maturityQuarters) : maturityQuarters;
   const recoveryLagQ = Math.max(0, Math.round(recoveryLagMonths / 3));
 
   // Pre-compute quarterly hazard rates per rating bucket
@@ -298,31 +310,36 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       : recoveryPipeline.filter((r) => r.quarter === q).reduce((s, r) => s + r.amount, 0);
 
     // ── 6. Interest collection ─────────────────────────────────
+    const flooredBaseRate = Math.max(0, baseRatePct); // EURIBOR floor at 0%
     let interestCollected: number;
     if (hasLoans) {
       interestCollected = 0;
       for (let i = 0; i < loanStates.length; i++) {
         const loan = loanStates[i];
         const loanBegPar = loanBeginningPar[i];
-        interestCollected += loanBegPar * (baseRatePct + loan.spreadBps / 100) / 100 / 4;
+        interestCollected += loanBegPar * (flooredBaseRate + loan.spreadBps / 100) / 100 / 4;
       }
     } else {
-      const allInRate = (baseRatePct + wacSpreadBps / 100) / 100;
+      const allInRate = (flooredBaseRate + wacSpreadBps / 100) / 100;
       interestCollected = beginningPar * allInRate / 4;
     }
 
     // ── 7. Reinvestment ─────────────────────────────────────────
     let reinvestment = 0;
+    const principalProceeds = prepayments + scheduledMaturities + recoveries;
     if (inRP) {
-      reinvestment = prepayments + scheduledMaturities + recoveries;
-      if (hasLoans && reinvestment > 0) {
-        loanStates.push({
-          survivingPar: reinvestment,
-          ratingBucket: reinvestmentRating,
-          spreadBps: reinvestmentSpreadBps,
-          maturityQuarter: Math.min(q + reinvestmentTenorQuarters, totalQuarters),
-        });
-      }
+      reinvestment = principalProceeds;
+    } else if (postRpReinvestmentPct > 0 && principalProceeds > 0) {
+      // Post-RP limited reinvestment (credit improved/risk sales, unscheduled principal)
+      reinvestment = principalProceeds * (postRpReinvestmentPct / 100);
+    }
+    if (reinvestment > 0 && hasLoans) {
+      loanStates.push({
+        survivingPar: reinvestment,
+        ratingBucket: reinvestmentRating,
+        spreadBps: reinvestmentSpreadBps,
+        maturityQuarter: Math.min(q + reinvestmentTenorQuarters, totalQuarters),
+      });
     }
 
     // Update currentPar from loan states or fallback
@@ -350,8 +367,14 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     // IMPORTANT: Save BOP tranche balances first — interest DUE and
     // IC tests must use beginning-of-period balances since interest
     // accrues on the balance before any principal paydown.
+    // PPM Steps A-D: Trustee/admin fees paid before senior management fee
+    const trusteeFeeAmount = beginningPar * (trusteeFeeBps / 10000) / 4;
+    // PPM Step E: Senior collateral management fee
     const seniorFeeAmount = beginningPar * (seniorFeePct / 100) / 4;
-    const interestAfterFees = Math.max(0, interestCollected - seniorFeeAmount);
+    // PPM Step F: Hedge payments
+    const hedgeCostAmount = beginningPar * (hedgeCostBps / 10000) / 4;
+    const totalSeniorExpenses = trusteeFeeAmount + seniorFeeAmount + hedgeCostAmount;
+    const interestAfterFees = Math.max(0, interestCollected - totalSeniorExpenses);
 
     const bopTrancheBalances: Record<string, number> = {};
     for (const t of debtTranches) {
@@ -397,10 +420,13 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     // OC uses post-paydown balances (liability position after payments).
     // IC uses BOP balances (interest due accrued on beginning balance).
     //
-    // CCC bucket haircut: if CCC-rated par exceeds the bucket limit,
-    // the excess is carried at market value instead of par in the OC
-    // numerator. This reduces the Adjusted Collateral Principal Amount.
-    let ocNumerator = endingPar;
+    // Adjusted Collateral Principal Amount = ending par + principal account cash
+    // + recovery value of defaulted-but-pending securities - CCC excess haircut
+    // Principal account cash: uninvested principal sitting in accounts (remainingPrelim)
+    const pendingRecoveryValue = recoveryPipeline
+      .filter((r) => r.quarter > q)
+      .reduce((s, r) => s + r.amount, 0);
+    let ocNumerator = endingPar + remainingPrelim + pendingRecoveryValue;
     if (hasLoans && cccBucketLimitPct > 0) {
       const cccPar = loanStates
         .filter((l) => l.ratingBucket === "CCC" && l.survivingPar > 0)
@@ -450,6 +476,17 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
         .map((ic) => ic.rank)
     );
 
+    // Reinvestment OC Test (PPM Step V): during RP only, if Class F OC < trigger,
+    // 50% of remaining interest (after all tranche payments) diverted to buy collateral or pay down notes
+    let reinvOcFailing = false;
+    if (inRP && reinvestmentOcTrigger) {
+      const reinvOcDebt = ocEligibleTranches
+        .filter((t) => t.seniorityRank <= reinvestmentOcTrigger.rank)
+        .reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
+      const reinvOcActual = reinvOcDebt > 0 ? (ocNumerator / reinvOcDebt) * 100 : 999;
+      reinvOcFailing = reinvOcActual < reinvestmentOcTrigger.triggerLevel;
+    }
+
     // ── 10. Interest waterfall (OC/IC-gated) ─────────────────────
     // Interest DUE uses BOP balances (accrued before paydown).
     // Simplification: Class X interest is paid sequentially before Class A interest
@@ -458,7 +495,12 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     let availableInterest = interestCollected;
     const trancheInterest: PeriodResult["trancheInterest"] = [];
 
+    // PPM Steps A-D: Taxes, trustee fees, admin expenses, expense reserve
+    availableInterest -= Math.min(trusteeFeeAmount, availableInterest);
+    // PPM Step E: Senior collateral management fee
     availableInterest -= Math.min(seniorFeeAmount, availableInterest);
+    // PPM Step F: Hedge payments
+    availableInterest -= Math.min(hedgeCostAmount, availableInterest);
 
     // Step G (PPM): Class X amort + Class A interest are paid pro rata / pari passu.
     // Class X amort starts on the second payment date (q >= 2) per PPM definition.
@@ -557,9 +599,40 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
       }
     }
 
-    // Subordinated management fee — paid after all debt tranches, before equity
+    // PPM Step V: Reinvestment OC Test — 50% diversion during RP only
+    if (reinvOcFailing && availableInterest > 0) {
+      let diversion = availableInterest * 0.5;
+      availableInterest -= diversion;
+      // Apply diverted funds to pay down senior tranches
+      for (const dt of sortedTranches) {
+        if (dt.isIncomeNote || diversion <= 0) continue;
+        const ddp = Math.min(deferredBalances[dt.className], diversion);
+        deferredBalances[dt.className] -= ddp;
+        diversion -= ddp;
+        const dp = Math.min(trancheBalances[dt.className], diversion);
+        trancheBalances[dt.className] -= dp;
+        principalPaid[dt.className] += ddp + dp;
+        diversion -= dp;
+      }
+    }
+
+    // PPM Step W: Subordinated management fee — paid after all debt tranches
     const subFeeAmount = beginningPar * (subFeePct / 100) / 4;
     availableInterest -= Math.min(subFeeAmount, availableInterest);
+
+    // PPM Step BB: Incentive management fee — % of residual above IRR hurdle
+    // Simplified: applied as flat % of equity residual each period when the hurdle
+    // is met. A full implementation would track cumulative IRR vs hurdle, but since
+    // we use constant assumptions the hurdle is either always met or never met.
+    // We check: if hurdle is 0 (no hurdle), always apply; otherwise estimate if
+    // the deal is performing above hurdle based on cumulative equity yield.
+    const incentiveFeeApplies = incentiveFeePct > 0 && (
+      incentiveFeeHurdleIrr <= 0 ||
+      (equityInvestment > 0 && totalEquityDistributions / equityInvestment > incentiveFeeHurdleIrr * (q / 4))
+    );
+    if (incentiveFeeApplies && availableInterest > 0) {
+      availableInterest -= availableInterest * (incentiveFeePct / 100);
+    }
 
     const equityFromInterest = availableInterest;
 
@@ -580,6 +653,11 @@ export function runProjection(inputs: ProjectionInputs): ProjectionResult {
     }
 
     const endingLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
+
+    // PPM Step U: Incentive fee from principal proceeds
+    if (incentiveFeeApplies && availablePrincipal > 0) {
+      availablePrincipal -= availablePrincipal * (incentiveFeePct / 100);
+    }
 
     const equityDistribution = equityFromInterest + availablePrincipal;
     totalEquityDistributions += equityDistribution;

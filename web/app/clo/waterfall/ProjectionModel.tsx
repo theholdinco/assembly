@@ -98,23 +98,31 @@ const MODEL_SIMPLIFICATIONS = [
   },
   {
     label: "Recovery pipeline",
-    detail: "Defaulted par generates recovery cash equal to the recovery rate, arriving after a configurable lag. Recovery is cash, not par restoration — it flows to the principal waterfall. At deal maturity, all pending recoveries are accelerated.",
+    detail: "Defaulted par generates recovery cash equal to the recovery rate, arriving after a configurable lag. Recovery is cash, not par restoration — it flows to the principal waterfall. Pending recoveries are included in OC at recovery value. At deal maturity, all pending recoveries are accelerated.",
   },
   {
     label: "Reinvestment",
-    detail: "During the reinvestment period, proceeds are reinvested into a synthetic loan each quarter using the configured rating, spread, and maturity tenor. Post-RP, all proceeds flow to the principal waterfall instead.",
+    detail: "During the reinvestment period, proceeds are fully reinvested. Post-RP, a configurable percentage of proceeds can still be reinvested (limited reinvestment from credit risk/improved sales). Default: 0% post-RP.",
   },
   {
     label: "Constant assumption rates",
-    detail: "Default rates, CPR, recovery rate, and base rate are held constant across all periods. Real performance will vary over time.",
+    detail: "Default rates, CPR, recovery rate, and base rate are held constant across all periods. EURIBOR is floored at 0%. Real performance will vary over time.",
   },
   {
     label: "Quarterly periodicity",
-    detail: "Cash flows are modeled in quarterly periods. Interest accrues on beginning-of-period par rather than daily accrual.",
+    detail: "Cash flows are modeled in quarterly periods. Interest accrues on beginning-of-period par rather than daily accrual. Frequency Switch Events (quarterly → semi-annual) are not modeled.",
   },
   {
-    label: "Full diversion on OC/IC failure",
-    detail: "When an OC or IC test fails, all remaining interest is diverted to principal paydown. Real indentures may allow partial cure.",
+    label: "Full waterfall with senior expenses",
+    detail: "Trustee/admin fees (Steps A-D), senior management fee (Step E), hedge costs (Step F), sub fee (Step W), and incentive fee (Steps BB/U) are all modeled. Incentive fee is simplified: applied as flat % when cumulative equity returns exceed the hurdle.",
+  },
+  {
+    label: "OC/IC tests with Reinvestment OC",
+    detail: "Standard OC/IC triggers cause 100% diversion. The Reinvestment OC Test (during RP only) causes 50% diversion of remaining interest. OC numerator includes principal account cash and pending recovery values.",
+  },
+  {
+    label: "Optional call scenario",
+    detail: "If a call date is set, the projection terminates at that date with full liquidation. Useful for modeling early redemption scenarios that significantly affect equity IRR.",
   },
 ];
 
@@ -132,14 +140,30 @@ function buildFromResolved(
     cccBucketLimitPct: number;
     cccMarketValuePct: number;
     deferredInterestCompounds: boolean;
+    postRpReinvestmentPct: number;
+    hedgeCostBps: number;
+    callDate: string | null;
   },
 ): ProjectionInputs {
+  // Build reinvestment OC trigger from the most junior OC test (typically Class F)
+  const sortedOc = [...resolved.ocTriggers].sort((a, b) => b.rank - a.rank);
+  const reinvestmentOcTrigger = sortedOc.length > 0
+    ? { triggerLevel: sortedOc[0].triggerLevel, rank: sortedOc[0].rank }
+    : null;
+
   return {
     initialPar: resolved.poolSummary.totalPar,
     wacSpreadBps: resolved.poolSummary.wacSpreadBps,
     baseRatePct: userAssumptions.baseRatePct,
     seniorFeePct: resolved.fees.seniorFeePct,
     subFeePct: resolved.fees.subFeePct,
+    trusteeFeeBps: resolved.fees.trusteeFeeBps,
+    hedgeCostBps: userAssumptions.hedgeCostBps,
+    incentiveFeePct: resolved.fees.incentiveFeePct,
+    incentiveFeeHurdleIrr: resolved.fees.incentiveFeeHurdleIrr,
+    postRpReinvestmentPct: userAssumptions.postRpReinvestmentPct,
+    callDate: userAssumptions.callDate,
+    reinvestmentOcTrigger,
     tranches: resolved.tranches.map(t => ({
       className: t.className,
       currentBalance: t.currentBalance,
@@ -245,6 +269,13 @@ export default function ProjectionModel({
           baseRatePct,
           seniorFeePct: 0,
           subFeePct: 0,
+          trusteeFeeBps: 2,
+          hedgeCostBps: 0,
+          incentiveFeePct: 0,
+          incentiveFeeHurdleIrr: 0,
+          postRpReinvestmentPct: 0,
+          callDate: null,
+          reinvestmentOcTrigger: null,
           tranches: [],
           ocTriggers: [],
           icTriggers: [],
@@ -276,6 +307,9 @@ export default function ProjectionModel({
         cccBucketLimitPct,
         cccMarketValuePct,
         deferredInterestCompounds: constraints.interestMechanics?.deferredInterestCompounds ?? true,
+        postRpReinvestmentPct: 0,
+        hedgeCostBps: 0,
+        callDate: null,
       });
     },
     [

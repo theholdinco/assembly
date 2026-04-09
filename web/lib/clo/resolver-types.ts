@@ -52,6 +52,9 @@ export interface ResolvedDates {
 export interface ResolvedFees {
   seniorFeePct: number;
   subFeePct: number;
+  trusteeFeeBps: number; // Trustee + admin expenses (PPM Steps B-C), in bps p.a.
+  incentiveFeePct: number; // Incentive management fee as % of residual above IRR hurdle (e.g. 20)
+  incentiveFeeHurdleIrr: number; // IRR hurdle for incentive fee (annualized, e.g. 0.12 for 12%)
 }
 
 export interface ResolvedLoan {

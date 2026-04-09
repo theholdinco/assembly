@@ -4,7 +4,10 @@ import { parseSpreadToBps, normalizeWacSpread } from "./ingestion-gate";
 import { mapToRatingBucket } from "./rating-mapping";
 
 function normClass(s: string): string {
-  return s.replace(/^class\s+/i, "").replace(/\s+notes?$/i, "").trim().toLowerCase();
+  const base = s.replace(/^class\s+/i, "").replace(/\s+notes?$/i, "").trim().toLowerCase();
+  // Normalize subordinated variants: "subordinated", "sub", "subordinated notes" all → "sub"
+  if (base === "subordinated" || base.startsWith("subordinated")) return "sub";
+  return base;
 }
 
 function parseAmount(s: string | undefined | null): number {
@@ -213,6 +216,9 @@ function resolveTriggers(
 function resolveFees(constraints: ExtractedConstraints, warnings: ResolutionWarning[]): ResolvedFees {
   let seniorFeePct = 0.15;
   let subFeePct = 0.25;
+  let trusteeFeeBps = 2; // typical European CLO trustee fee
+  let incentiveFeePct = 20; // typical 20% of residual above hurdle
+  let incentiveFeeHurdleIrr = 0.12; // typical 12% hurdle
 
   for (const fee of constraints.fees ?? []) {
     const name = fee.name?.toLowerCase() ?? "";
@@ -223,10 +229,14 @@ function resolveFees(constraints: ExtractedConstraints, warnings: ResolutionWarn
       seniorFeePct = rate;
     } else if (name.includes("sub") && (name.includes("mgmt") || name.includes("management"))) {
       subFeePct = rate;
+    } else if (name.includes("trustee") || name.includes("admin")) {
+      trusteeFeeBps = rate;
+    } else if (name.includes("incentive") || name.includes("performance")) {
+      incentiveFeePct = rate;
     }
   }
 
-  return { seniorFeePct, subFeePct };
+  return { seniorFeePct, subFeePct, trusteeFeeBps, incentiveFeePct, incentiveFeeHurdleIrr };
 }
 
 export function resolveWaterfallInputs(
@@ -244,7 +254,31 @@ export function resolveWaterfallInputs(
   const warnings: ResolutionWarning[] = [];
 
   // --- Tranches ---
-  const tranches = resolveTranches(constraints, dbTranches, trancheSnapshots, warnings);
+  const rawTranches = resolveTranches(constraints, dbTranches, trancheSnapshots, warnings);
+
+  // Deduplicate by normalized class name — keep the entry with the lower seniority rank
+  // (more authoritative). This handles "Subordinated Notes" vs "Sub" from different sources.
+  const seenClasses = new Map<string, number>();
+  const tranches: ResolvedTranche[] = [];
+  for (const t of rawTranches) {
+    const key = normClass(t.className);
+    const existingIdx = seenClasses.get(key);
+    if (existingIdx != null) {
+      const existing = tranches[existingIdx];
+      // Keep whichever has the better seniority rank (lower = more authoritative)
+      if (t.seniorityRank < existing.seniorityRank) {
+        tranches[existingIdx] = t;
+      }
+      warnings.push({
+        field: `${t.className}`,
+        message: `Duplicate tranche "${t.className}" (source: ${t.source}) merged with "${existing.className}" (source: ${existing.source})`,
+        severity: "info",
+      });
+    } else {
+      seenClasses.set(key, tranches.length);
+      tranches.push(t);
+    }
+  }
 
   // --- Pool Summary ---
   const pool = complianceData?.poolSummary;
