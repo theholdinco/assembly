@@ -59,73 +59,64 @@ const TRANCHE_COLORS = [
   "#2d6a4f", "#5a7c2f", "#92641a", "#b54a32", "#7c3aed", "#2563eb",
 ];
 
-const WATERFALL_MECHANICS = [
-  {
-    label: "1. Collateral cash flows",
-    detail: "Each quarter, the portfolio generates cash from three sources: interest collected on performing loans, principal from maturing and prepaying loans, and recovery cash from previously defaulted loans. Defaults and prepayments reduce the performing pool each period.",
-  },
-  {
-    label: "2. Senior fees",
-    detail: "Trustee, administrative, and collateral manager senior fees are deducted first from interest collections before any tranche receives payment.",
-  },
-  {
-    label: "3. Interest waterfall",
-    detail: "After senior fees, interest is paid to debt tranches in seniority order (most senior first). After paying each tranche, the OC and IC tests at that level are checked. If a test fails, all remaining interest is diverted to principal paydown — junior tranches receive nothing.",
-  },
-  {
-    label: "4. OC test (overcollateralization)",
-    detail: "OC ratio = performing collateral par / debt outstanding at-and-above the tested class. If the ratio falls below the trigger (e.g. 120%), the test fails. This protects senior investors by diverting cash from equity to pay down debt when collateral erodes.",
-  },
-  {
-    label: "5. IC test (interest coverage)",
-    detail: "IC ratio = interest collected (after senior fees) / interest due on debt at-and-above the tested class. If the ratio falls below the trigger, the test fails. This ensures there's enough interest income to service the debt before equity gets paid.",
-  },
-  {
-    label: "6. Principal waterfall",
-    detail: "Principal proceeds (prepayments + maturities + recoveries − reinvestment + any diverted interest) pay down debt tranches in seniority order. During the reinvestment period, most principal is reinvested rather than used for paydown. At deal maturity, all remaining collateral is liquidated.",
-  },
-  {
-    label: "7. Equity distribution",
-    detail: "Whatever remains after senior fees, tranche interest, and tranche principal goes to equity holders. This includes residual interest (if no OC/IC diversion consumed it) plus any leftover principal proceeds.",
-  },
-  {
-    label: "8. Equity IRR",
-    detail: "The annualized internal rate of return on equity cash flows, computed via Newton-Raphson. The initial investment (collateral par minus total debt) is the negative cash flow at time zero; quarterly equity distributions are the positive cash flows.",
-  },
-];
+// Comprehensive assumptions register — organized by domain with impact severity.
+// Impact: "high" = could change IRR by 200+ bps, "medium" = 50-200 bps, "low" = under 50 bps
+type AssumptionImpact = "high" | "medium" | "low";
 
-const MODEL_SIMPLIFICATIONS = [
+interface Assumption {
+  label: string;
+  detail: string;
+  impact: AssumptionImpact;
+}
+
+const ASSUMPTIONS_REGISTER: { domain: string; items: Assumption[] }[] = [
   {
-    label: "Per-loan default model",
-    detail: "Each loan is modeled individually with a rating-based annual default rate (converted to a quarterly hazard rate). Defaults reduce a loan's expected surviving par each quarter. At maturity, only the surviving portion exits the pool.",
+    domain: "Defaults & Recovery",
+    items: [
+      { label: "Deterministic single-path model", detail: "This is NOT a Monte Carlo simulation. It produces one deterministic cash flow path. Real outcomes have wide distributions around this estimate. A deal projected at 14% IRR might realize anywhere from 8% to 20% depending on actual default timing and severity.", impact: "high" },
+      { label: "No default correlation", detail: "Each loan defaults independently based on its rating bucket. In reality, defaults are correlated — economic downturns cause clusters of defaults. This model understates tail risk.", impact: "high" },
+      { label: "No rating migration", detail: "Loans stay at their initial rating for the entire projection. In reality, loans get upgraded and downgraded, which changes their default probability and affects CCC bucket limits and OC tests.", impact: "high" },
+      { label: "Constant recovery rate", detail: "A single recovery rate applies to all defaults regardless of rating, sector, seniority, or economic conditions. Real recovery rates vary widely (20-80%) and are lower in downturns when defaults are highest.", impact: "medium" },
+      { label: "Fixed recovery lag", detail: "Recovery cash arrives after a fixed delay. In practice, recovery timelines are highly variable (months to years) and affect the time value of money.", impact: "low" },
+      { label: "No partial recoveries", detail: "Each default either recovers the fixed percentage after the lag, or nothing. Real workouts produce multiple partial payments over time.", impact: "low" },
+    ],
   },
   {
-    label: "Recovery pipeline",
-    detail: "Defaulted par generates recovery cash equal to the recovery rate, arriving after a configurable lag. Recovery is cash, not par restoration — it flows to the principal waterfall. Pending recoveries are included in OC at recovery value. At deal maturity, all pending recoveries are accelerated.",
+    domain: "Interest Rates",
+    items: [
+      { label: "Flat rate assumption", detail: "The base rate (EURIBOR) is held constant for the entire projection. There is no forward curve, no rate volatility, and no term structure. Since CLO equity returns are highly sensitive to rate movements, this is a major simplification.", impact: "high" },
+      { label: "EURIBOR floored at 0%", detail: "The model floors the base rate at 0% for both collateral interest and tranche coupons. Most European CLOs have this floor, but the exact floor level may vary by deal.", impact: "low" },
+      { label: "No day count conventions", detail: "Interest accrues as simple quarterly fractions (annual rate / 4). Real deals use specific day count conventions (Actual/360, 30/360) that produce slightly different amounts.", impact: "low" },
+      { label: "No EURIBOR fixing lag", detail: "The model uses the input rate immediately. Real deals reference EURIBOR fixings from 2 business days prior to the interest period start.", impact: "low" },
+    ],
   },
   {
-    label: "Reinvestment",
-    detail: "During the reinvestment period, proceeds are fully reinvested. Post-RP, a configurable percentage of proceeds can still be reinvested (limited reinvestment from credit risk/improved sales). Default: 0% post-RP.",
+    domain: "Reinvestment & Trading",
+    items: [
+      { label: "No active trading", detail: "The model does not capture manager trading activity (sales, purchases, credit risk trades). Real CLO managers actively trade — the Ares XVIII compliance report shows €5.8M in sales with a -€558K loss in a single month. Trading gains/losses directly affect par and returns.", impact: "high" },
+      { label: "Reinvestment at par", detail: "Reinvested assets are always purchased at par (100 cents on the dollar). In practice, managers buy at varying prices — discounts improve returns, premiums reduce them.", impact: "medium" },
+      { label: "Uniform reinvestment quality", detail: "All reinvestment goes into a single synthetic loan with one rating and spread. Real reinvestment is diversified across many names, ratings, and spreads.", impact: "medium" },
+      { label: "Constant prepayment rate", detail: "CPR is held constant. In reality, prepayments are cyclical — they increase when rates fall (borrowers refinance) and decrease when rates rise. This interacts with reinvestment spread.", impact: "medium" },
+    ],
   },
   {
-    label: "Constant assumption rates",
-    detail: "Default rates, CPR, recovery rate, and base rate are held constant across all periods. EURIBOR is floored at 0%. Real performance will vary over time.",
+    domain: "Fees & Expenses",
+    items: [
+      { label: "Simplified incentive fee", detail: "The incentive fee uses a linear hurdle approximation, not a true IRR gate. The actual incentive fee calculation in most indentures is more complex, involving catch-up provisions and look-back periods.", impact: "medium" },
+      { label: "No expense reserve modeling", detail: "The PPM allows discretionary top-up of the expense reserve account, which traps cash before it reaches noteholders. This is not modeled.", impact: "low" },
+      { label: "No Senior Expenses Cap", detail: "Real deals cap total non-management expenses (typically €350K-500K/year). The model applies fees without this cap.", impact: "low" },
+      { label: "No collateral manager advances", detail: "The PPM allows the manager to make advances (at EURIBOR + 4%) to buy enhancement obligations. These create a senior claim on waterfall cash. Not modeled.", impact: "low" },
+    ],
   },
   {
-    label: "Quarterly periodicity",
-    detail: "Cash flows are modeled in quarterly periods. Interest accrues on beginning-of-period par rather than daily accrual. Frequency Switch Events (quarterly → semi-annual) are not modeled.",
-  },
-  {
-    label: "Full waterfall with senior expenses",
-    detail: "Trustee/admin fees (Steps A-D), senior management fee (Step E), hedge costs (Step F), sub fee (Step W), and incentive fee (Steps BB/U) are all modeled. Incentive fee is simplified: applied as flat % when cumulative equity returns exceed the hurdle.",
-  },
-  {
-    label: "OC/IC tests with Reinvestment OC",
-    detail: "Standard OC/IC triggers cause 100% diversion. The Reinvestment OC Test (during RP only) causes 50% diversion of remaining interest. OC numerator includes principal account cash and pending recovery values.",
-  },
-  {
-    label: "Optional call scenario",
-    detail: "If a call date is set, the projection terminates at that date with full liquidation. Useful for modeling early redemption scenarios that significantly affect equity IRR.",
+    domain: "Deal Structure",
+    items: [
+      { label: "No call prediction", detail: "The model does not predict when a deal will be called. Most performing CLOs are called at or near the first call date, which dramatically changes equity returns. Use the call date input to model this scenario.", impact: "high" },
+      { label: "No post-acceleration waterfall", detail: "Following an Event of Default, the real waterfall collapses into a simplified combined priority. This distressed scenario is not modeled.", impact: "medium" },
+      { label: "No frequency switch", detail: "Some deals switch from quarterly to semi-annual payments after a trigger event. The model is hardcoded to quarterly periods.", impact: "low" },
+      { label: "Quarterly periodicity", detail: "Cash flows are modeled in quarterly periods with beginning-of-period accrual. Real deals accrue daily and pay on specific calendar dates with business day adjustments.", impact: "low" },
+      { label: "No discount obligation haircut", detail: "Assets purchased below 85% of par should be carried at purchase price in OC calculations. The model only applies CCC excess haircuts.", impact: "low" },
+    ],
   },
 ];
 
@@ -540,7 +531,7 @@ export default function ProjectionModel({
                 }}
               />
               <div style={{ fontSize: "0.7rem", fontWeight: 500, color: "rgba(255,255,255,0.7)", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Equity IRR
+                Equity IRR <span style={{ fontSize: "0.55rem", fontWeight: 400, letterSpacing: "0.02em", opacity: 0.7 }}>(model estimate)</span>
               </div>
               <div
                 style={{
@@ -935,6 +926,38 @@ function DisclosureItem({ label, detail }: { label: string; detail: string }) {
   );
 }
 
+function AssumptionItem({ label, detail, impact }: { label: string; detail: string; impact: AssumptionImpact }) {
+  const dotColor = impact === "high" ? "var(--color-low)" : impact === "medium" ? "var(--color-warning, #d97706)" : "var(--color-text-muted)";
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "0.5rem",
+        padding: "0.4rem 0",
+        borderTop: "1px solid var(--color-border-light)",
+        fontSize: "0.75rem",
+        lineHeight: 1.4,
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          width: "0.4rem",
+          height: "0.4rem",
+          marginTop: "0.3rem",
+          borderRadius: "50%",
+          background: dotColor,
+        }}
+        title={`Impact: ${impact}`}
+      />
+      <div>
+        <span style={{ fontWeight: 600 }}>{label}:</span>{" "}
+        <span style={{ color: "var(--color-text-muted)" }}>{detail}</span>
+      </div>
+    </div>
+  );
+}
+
 function ModelAssumptions() {
   const [open, setOpen] = useState(false);
 
@@ -965,21 +988,23 @@ function ModelAssumptions() {
         }}
       >
         <span style={{ fontSize: "0.65rem" }}>{open ? "▾" : "▸"}</span>
-        How This Model Works
+        Model Assumptions & Limitations
       </button>
       {open && (
         <div style={{ padding: "0 0.8rem 0.8rem" }}>
-          <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.5rem", paddingTop: "0.25rem" }}>
-            Waterfall Mechanics
+          <div style={{ fontSize: "0.72rem", color: "var(--color-text-muted)", marginBottom: "0.75rem", paddingTop: "0.25rem", lineHeight: 1.5 }}>
+            This is a simplified deterministic projection. All outputs are estimates based on the assumptions below.{" "}
+            <span style={{ fontWeight: 600 }}>Items marked with a red dot could change the equity IRR by 200+ basis points.</span>
           </div>
-          {WATERFALL_MECHANICS.map((a) => (
-            <DisclosureItem key={a.label} label={a.label} detail={a.detail} />
-          ))}
-          <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginTop: "1rem", marginBottom: "0.5rem" }}>
-            Model Simplifications
-          </div>
-          {MODEL_SIMPLIFICATIONS.map((a) => (
-            <DisclosureItem key={a.label} label={a.label} detail={a.detail} />
+          {ASSUMPTIONS_REGISTER.map((group) => (
+            <div key={group.domain}>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginTop: "0.75rem", marginBottom: "0.4rem" }}>
+                {group.domain}
+              </div>
+              {group.items.map((a) => (
+                <AssumptionItem key={a.label} label={a.label} detail={a.detail} impact={a.impact} />
+              ))}
+            </div>
           ))}
         </div>
       )}
