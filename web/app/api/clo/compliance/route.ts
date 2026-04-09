@@ -58,7 +58,7 @@ function buildUpdateQuery(
 
   values.push(id, reportPeriodId);
   return {
-    sql: `UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = $${paramIndex - 1} AND report_period_id = $${paramIndex}`,
+    sql: `UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = $${paramIndex} AND report_period_id = $${paramIndex + 1}`,
     values,
   };
 }
