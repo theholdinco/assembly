@@ -135,6 +135,9 @@ function parseSpreadBps(spreadBps: number | undefined | null, spreadStr: string 
   // Try bps directly: "150bps", "150 bps"
   const bpsMatch = spreadStr.match(/([\d.]+)\s*bps/i);
   if (bpsMatch) return parseFloat(bpsMatch[1]) || 0;
+  // Plain number: treat as bps if >= 1, percentage if < 1
+  const plain = parseFloat(spreadStr);
+  if (!isNaN(plain) && plain > 0) return plain >= 1 ? Math.round(plain) : Math.round(plain * 10000);
   return 0;
 }
 
@@ -237,6 +240,12 @@ export default function ProjectionModel({
       const snapshotByTrancheId = new Map(trancheSnapshots.map((s) => [s.trancheId, s]));
       const classXAmort = constraints.dealSizing?.classXAmortisation;
       const classXAmortPerQuarter = classXAmort ? parseAmount(classXAmort) : null;
+      // Build a lookup from PPM constraints to fill in missing spreadBps from DB tranches
+      const ppmSpreadByClass = new Map<string, number>();
+      for (const e of constraints.capitalStructure ?? []) {
+        const bps = parseSpreadBps(e.spreadBps, e.spread);
+        if (bps > 0) ppmSpreadByClass.set(e.class, bps);
+      }
       return [...tranches]
         .sort((a, b) => (a.seniorityRank ?? 99) - (b.seniorityRank ?? 99))
         .map((t) => {
@@ -245,7 +254,7 @@ export default function ProjectionModel({
           return {
             className: t.className,
             currentBalance: snap?.currentBalance ?? t.originalBalance ?? 0,
-            spreadBps: t.spreadBps ?? 0,
+            spreadBps: t.spreadBps ?? ppmSpreadByClass.get(t.className) ?? 0,
             seniorityRank: t.seniorityRank ?? 99,
             isFloating: t.isFloating ?? true,
             isIncomeNote: t.isIncomeNote ?? t.isSubordinate ?? false,
