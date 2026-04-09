@@ -122,6 +122,22 @@ function parseAmount(s: string | undefined | null): number {
   return parseFloat(cleaned) || 0;
 }
 
+// Parse spread string like "EURIBOR + 1.47%", "3.50%", "E+150bps", "5.50% fixed" → bps
+function parseSpreadBps(spreadBps: number | undefined | null, spreadStr: string | undefined | null): number {
+  if (spreadBps != null && spreadBps > 0) return spreadBps;
+  if (!spreadStr) return 0;
+  // Try to find a percentage: "1.47%", "+ 0.50%", "5.50% fixed"
+  const pctMatch = spreadStr.match(/([\d.]+)\s*%/);
+  if (pctMatch) {
+    const pct = parseFloat(pctMatch[1]);
+    if (pct > 0) return Math.round(pct * 100);
+  }
+  // Try bps directly: "150bps", "150 bps"
+  const bpsMatch = spreadStr.match(/([\d.]+)\s*bps/i);
+  if (bpsMatch) return parseFloat(bpsMatch[1]) || 0;
+  return 0;
+}
+
 function buildTranchesFromConstraints(constraints: ExtractedConstraints) {
   const entries = constraints.capitalStructure ?? [];
   if (entries.length === 0) return [];
@@ -146,7 +162,7 @@ function buildTranchesFromConstraints(constraints: ExtractedConstraints) {
     return {
       className: e.class,
       currentBalance: parseAmount(e.principalAmount),
-      spreadBps: e.spreadBps ?? 0,
+      spreadBps: parseSpreadBps(e.spreadBps, e.spread),
       seniorityRank: idx + 1,
       isFloating,
       isIncomeNote: isSubordinated,
