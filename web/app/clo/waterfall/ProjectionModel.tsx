@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import type {
   CloTranche,
@@ -13,8 +13,11 @@ import type {
 import {
   runProjection,
   validateInputs,
+  computeSensitivity,
   type ProjectionInputs,
   type ProjectionResult,
+  type PeriodResult,
+  type SensitivityRow,
   type LoanInput,
 } from "@/lib/clo/projection";
 import type { ResolvedDealData, ResolutionWarning } from "@/lib/clo/resolver-types";
@@ -228,7 +231,8 @@ export default function ProjectionModel({
   const [subFeePct, setSubFeePct] = useState(0.20);
   const [cccBucketLimitPct, setCccBucketLimitPct] = useState(7.5);
   const [cccMarketValuePct, setCccMarketValuePct] = useState(70);
-  const [showCashFlows, setShowCashFlows] = useState(false);
+  const [showTransparency, setShowTransparency] = useState(false);
+  const [expandedPeriod, setExpandedPeriod] = useState<number | null>(null);
 
   const loanInputs: LoanInput[] = resolved?.loans ?? [];
 
@@ -317,6 +321,14 @@ export default function ProjectionModel({
   const result: ProjectionResult | null = useMemo(
     () => (validationErrors.length === 0 ? runProjection(inputs) : null),
     [inputs, validationErrors]
+  );
+
+  const sensitivity: SensitivityRow[] = useMemo(
+    () => {
+      if (!result || result.equityIrr === null) return [];
+      return computeSensitivity(inputs, result.equityIrr);
+    },
+    [inputs, result]
   );
 
   const handleApplyAssumptions = (assumptions: {
@@ -554,6 +566,105 @@ export default function ProjectionModel({
             />
           </div>
 
+          {/* Transparency section */}
+          <div
+            style={{
+              marginBottom: "1.5rem",
+              border: "1px solid var(--color-border-light)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--color-surface)",
+            }}
+          >
+            <button
+              onClick={() => setShowTransparency(!showTransparency)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.4rem",
+                padding: "0.6rem 0.8rem",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "0.8rem",
+                fontWeight: 600,
+                color: "var(--color-text-secondary)",
+                textAlign: "left",
+                fontFamily: "var(--font-body)",
+              }}
+            >
+              <span style={{ fontSize: "0.65rem" }}>{showTransparency ? "▾" : "▸"}</span>
+              Transparency
+            </button>
+
+            {showTransparency && (
+              <div style={{ padding: "0 0.8rem 0.8rem" }}>
+                <SensitivityTable rows={sensitivity} baseIrr={result.equityIrr} />
+                {resolved && <ModelInputsPanel resolved={resolved} inputs={inputs} />}
+
+                {/* Cash Flow Table with expandable period traces */}
+                <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.5rem", marginTop: "0.5rem" }}>
+                  Cash Flow Detail
+                </div>
+                <div
+                  style={{
+                    overflowX: "auto",
+                    overflowY: "auto",
+                    maxHeight: "600px",
+                    border: "1px solid var(--color-border-light)",
+                    borderRadius: "var(--radius-sm)",
+                  }}
+                >
+                  <table
+                    className="wf-table"
+                    style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", fontVariantNumeric: "tabular-nums" }}
+                  >
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "right", background: "var(--color-surface)", position: "sticky", top: 0, zIndex: 1 }}>
+                        {["Date", "Beg Par", "Defaults", "Prepays", "Maturities", "Recoveries", "Reinvest", "End Par", "Beg Liab", "End Liab", "Interest", "Equity"].map((h) => (
+                          <th key={h} style={{ padding: "0.5rem 0.6rem", textAlign: h === "Date" ? "left" : "right", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.periods.map((p) => (
+                        <React.Fragment key={p.periodNum}>
+                          <tr
+                            onClick={() => setExpandedPeriod(expandedPeriod === p.periodNum ? null : p.periodNum)}
+                            style={{ borderBottom: "1px solid var(--color-border-light)", cursor: "pointer", background: expandedPeriod === p.periodNum ? "var(--color-surface-alt, var(--color-surface))" : undefined }}
+                          >
+                            <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
+                              <span style={{ fontSize: "0.6rem", marginRight: "0.3rem" }}>{expandedPeriod === p.periodNum ? "▾" : "▸"}</span>
+                              {formatDate(p.date)}
+                            </td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningPar)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.defaults > 0 ? "var(--color-low)" : undefined }}>{formatAmount(p.defaults)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.prepayments)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.scheduledMaturities)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.recoveries)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.reinvestment)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingPar)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningLiabilities)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingLiabilities)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.interestCollected)}</td>
+                            <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.equityDistribution > 0 ? "var(--color-high)" : undefined, fontWeight: p.equityDistribution > 0 ? 600 : undefined }}>{formatAmount(p.equityDistribution)}</td>
+                          </tr>
+                          {expandedPeriod === p.periodNum && (
+                            <tr>
+                              <td colSpan={12} style={{ padding: 0 }}>
+                                <PeriodTrace period={p} inputs={inputs} />
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Model simplifications disclosure */}
           <ModelAssumptions />
 
@@ -702,87 +813,6 @@ export default function ProjectionModel({
             </div>
           </div>
 
-          {/* Cash flow table */}
-          <div>
-            <button
-              onClick={() => setShowCashFlows(!showCashFlows)}
-              style={{
-                background: showCashFlows ? "var(--color-surface-alt)" : "var(--color-surface)",
-                border: "1px solid var(--color-border-light)",
-                borderRadius: "var(--radius-sm)",
-                padding: "0.5rem 1rem",
-                cursor: "pointer",
-                fontSize: "0.8rem",
-                color: "var(--color-text-secondary)",
-                fontFamily: "var(--font-body)",
-                transition: "background 0.15s ease",
-              }}
-            >
-              {showCashFlows ? "▾ Hide" : "▸ Show"} Cash Flow Detail
-            </button>
-
-            {showCashFlows && (
-              <div
-                style={{
-                  overflowX: "auto",
-                  overflowY: "auto",
-                  maxHeight: "520px",
-                  marginTop: "0.75rem",
-                  border: "1px solid var(--color-border-light)",
-                  borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <table
-                  className="wf-table"
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: "0.75rem",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "right", background: "var(--color-surface)", position: "sticky", top: 0, zIndex: 1 }}>
-                      <th style={{ padding: "0.5rem 0.6rem", textAlign: "left", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Date</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Beg Par</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Defaults</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Prepays</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Maturities</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Recoveries</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Reinvest</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>End Par</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Beg Liab</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>End Liab</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Interest</th>
-                      <th style={{ padding: "0.5rem 0.6rem", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Equity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.periods.map((p) => (
-                      <tr key={p.periodNum} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
-                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatDate(p.date)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningPar)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.defaults > 0 ? "var(--color-low)" : undefined }}>
-                          {formatAmount(p.defaults)}
-                        </td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.prepayments)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.scheduledMaturities)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.recoveries)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.reinvestment)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingPar)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.beginningLiabilities)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.endingLiabilities)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(p.interestCollected)}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: p.equityDistribution > 0 ? "var(--color-high)" : undefined, fontWeight: p.equityDistribution > 0 ? 600 : undefined }}>
-                          {formatAmount(p.equityDistribution)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -1117,6 +1147,225 @@ function SummaryCard({
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+function SensitivityTable({ rows, baseIrr }: { rows: SensitivityRow[]; baseIrr: number | null }) {
+  if (rows.length === 0 || baseIrr === null) return null;
+  return (
+    <div style={{ marginBottom: "1.25rem" }}>
+      <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
+        IRR Sensitivity
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", fontVariantNumeric: "tabular-nums" }}>
+        <thead>
+          <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "right" }}>
+            {["Assumption", "Base", "Down", "Up", "IRR Impact"].map((h) => (
+              <th key={h} style={{ padding: "0.4rem 0.6rem", textAlign: h === "Assumption" ? "left" : "right", fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const downDelta = row.downIrr !== null ? (row.downIrr - baseIrr) * 100 : null;
+            const upDelta = row.upIrr !== null ? (row.upIrr - baseIrr) * 100 : null;
+            return (
+              <tr key={row.assumption} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
+                <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500 }}>{row.assumption}</td>
+                <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{row.base}</td>
+                <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{row.down}</td>
+                <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{row.up}</td>
+                <td style={{ padding: "0.45rem 0.6rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
+                  {downDelta !== null && upDelta !== null ? (
+                    <>
+                      <span style={{ color: downDelta >= 0 ? "var(--color-high)" : "var(--color-low)" }}>
+                        {downDelta >= 0 ? "+" : ""}{downDelta.toFixed(2)}%
+                      </span>
+                      {" / "}
+                      <span style={{ color: upDelta >= 0 ? "var(--color-high)" : "var(--color-low)" }}>
+                        {upDelta >= 0 ? "+" : ""}{upDelta.toFixed(2)}%
+                      </span>
+                    </>
+                  ) : "N/A"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ModelInputsPanel({ resolved, inputs }: { resolved: ResolvedDealData; inputs: ProjectionInputs }) {
+  const [open, setOpen] = useState(false);
+
+  const sourceBadge = (source: string) => {
+    const colors: Record<string, string> = {
+      snapshot: "var(--color-high)",
+      compliance: "var(--color-high)",
+      db_tranche: "var(--color-accent)",
+      ppm: "var(--color-warning, #d97706)",
+      default: "var(--color-low)",
+    };
+    return (
+      <span style={{ fontSize: "0.6rem", fontWeight: 600, padding: "0.1rem 0.35rem", borderRadius: "3px", background: `${colors[source] ?? "var(--color-text-muted)"}18`, color: colors[source] ?? "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+        {source}
+      </span>
+    );
+  };
+
+  const kvStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", padding: "0.3rem 0", fontSize: "0.73rem", borderBottom: "1px solid var(--color-border-light)" };
+  const kvLabel: React.CSSProperties = { color: "var(--color-text-muted)" };
+  const kvValue: React.CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.72rem", fontWeight: 500 };
+
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <button onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem", color: "var(--color-text-muted)", fontFamily: "var(--font-body)" }}>
+        <span style={{ fontSize: "0.6rem" }}>{open ? "▾" : "▸"}</span>
+        Model Inputs
+      </button>
+      {open && (
+        <div style={{ marginTop: "0.5rem" }}>
+          <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Capital Structure</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.73rem", fontVariantNumeric: "tabular-nums", marginBottom: "1rem" }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "right" }}>
+                {["Class", "Balance", "Spread", "Type", "Defer.", "Source"].map((h) => (
+                  <th key={h} style={{ padding: "0.35rem 0.5rem", textAlign: h === "Class" || h === "Source" ? "left" : "right", fontWeight: 600, fontSize: "0.65rem", textTransform: "uppercase", color: "var(--color-text-muted)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {resolved.tranches.map((t) => (
+                <tr key={t.className} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
+                  <td style={{ padding: "0.35rem 0.5rem", fontWeight: 500 }}>{t.className}</td>
+                  <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>{formatAmount(t.currentBalance)}</td>
+                  <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
+                    {t.isIncomeNote ? "\u2014" : t.isFloating ? `${t.spreadBps} bps` : `Fixed ${(t.spreadBps / 100).toFixed(2)}%`}
+                  </td>
+                  <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", fontSize: "0.72rem" }}>{t.isFloating ? "Float" : "Fixed"}</td>
+                  <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", fontSize: "0.72rem" }}>{t.isDeferrable ? "Yes" : "No"}</td>
+                  <td style={{ padding: "0.35rem 0.5rem" }}>{sourceBadge(t.source)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
+            <div>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Fees</div>
+              <div style={kvStyle}><span style={kvLabel}>Senior Mgmt</span> <span style={kvValue}>{resolved.fees.seniorFeePct}%</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Sub Mgmt</span> <span style={kvValue}>{resolved.fees.subFeePct}%</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Trustee/Admin</span> <span style={kvValue}>{resolved.fees.trusteeFeeBps} bps</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Incentive</span> <span style={kvValue}>{resolved.fees.incentiveFeePct > 0 ? `${resolved.fees.incentiveFeePct}%` : "None"}</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Hedge Cost</span> <span style={kvValue}>{inputs.hedgeCostBps} bps</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Dates</div>
+              <div style={kvStyle}><span style={kvLabel}>Maturity</span> <span style={kvValue}>{resolved.dates.maturity}</span></div>
+              <div style={kvStyle}><span style={kvLabel}>RP End</span> <span style={kvValue}>{resolved.dates.reinvestmentPeriodEnd ?? "N/A"}</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Non-Call</span> <span style={kvValue}>{resolved.dates.nonCallPeriodEnd ?? "N/A"}</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Call Date</span> <span style={kvValue}>{inputs.callDate ?? "Not set"}</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Pool</div>
+              <div style={kvStyle}><span style={kvLabel}>Initial Par</span> <span style={kvValue}>{formatAmount(resolved.poolSummary.totalPar)}</span></div>
+              <div style={kvStyle}><span style={kvLabel}>WAC Spread</span> <span style={kvValue}>{resolved.poolSummary.wacSpreadBps} bps</span></div>
+              <div style={kvStyle}><span style={kvLabel}>Loans</span> <span style={kvValue}>{resolved.loans.length}</span></div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+            <div>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>OC Triggers</div>
+              {resolved.ocTriggers.map((t) => (
+                <div key={t.className} style={kvStyle}><span style={kvLabel}>{t.className}</span> <span style={kvValue}>{t.triggerLevel}% {sourceBadge(t.source)}</span></div>
+              ))}
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>IC Triggers</div>
+              {resolved.icTriggers.map((t) => (
+                <div key={t.className} style={kvStyle}><span style={kvLabel}>{t.className}</span> <span style={kvValue}>{t.triggerLevel}% {sourceBadge(t.source)}</span></div>
+              ))}
+              {resolved.reinvestmentOcTrigger && (
+                <>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginTop: "0.5rem", marginBottom: "0.4rem" }}>Reinvestment OC</div>
+                  <div style={kvStyle}><span style={kvLabel}>Trigger</span> <span style={kvValue}>{resolved.reinvestmentOcTrigger.triggerLevel}%</span></div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PeriodTrace({ period, inputs }: { period: PeriodResult; inputs: ProjectionInputs }) {
+  const beginPar = period.beginningPar;
+  const trusteeFee = beginPar * (inputs.trusteeFeeBps / 10000) / 4;
+  const seniorFee = beginPar * (inputs.seniorFeePct / 100) / 4;
+  const hedgeCost = beginPar * (inputs.hedgeCostBps / 10000) / 4;
+  const subFee = beginPar * (inputs.subFeePct / 100) / 4;
+  const availableAfterSenior = period.interestCollected - trusteeFee - seniorFee - hedgeCost;
+
+  const principalAvailable = Math.max(0, period.prepayments + period.scheduledMaturities + period.recoveries - period.reinvestment);
+  const equityFromInterest = Math.max(0, period.equityDistribution - principalAvailable);
+
+  const lineStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", padding: "0.2rem 0", fontSize: "0.72rem", fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" };
+  const indent: React.CSSProperties = { paddingLeft: "1.2rem" };
+  const labelStyle: React.CSSProperties = { color: "var(--color-text-muted)" };
+  const feeColor = "var(--color-low)";
+  const eqColor = "var(--color-high)";
+  const dividerStyle: React.CSSProperties = { borderTop: "1px solid var(--color-border-light)", margin: "0.3rem 0" };
+
+  return (
+    <div style={{ padding: "0.75rem 1rem", background: "var(--color-surface-alt, var(--color-surface))", borderTop: "1px dashed var(--color-border-light)", fontSize: "0.72rem" }}>
+      <div style={{ fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Interest Waterfall</div>
+      <div style={lineStyle}><span>Interest Collected</span><span>{formatAmount(period.interestCollected)}</span></div>
+      <div style={{ ...lineStyle, ...indent }}><span style={{ color: feeColor }}>Trustee/Admin ({inputs.trusteeFeeBps} bps)</span><span style={{ color: feeColor }}>-{formatAmount(trusteeFee)}</span></div>
+      <div style={{ ...lineStyle, ...indent }}><span style={{ color: feeColor }}>Senior Mgmt Fee ({inputs.seniorFeePct}%)</span><span style={{ color: feeColor }}>-{formatAmount(seniorFee)}</span></div>
+      {hedgeCost > 0 && <div style={{ ...lineStyle, ...indent }}><span style={{ color: feeColor }}>Hedge Costs ({inputs.hedgeCostBps} bps)</span><span style={{ color: feeColor }}>-{formatAmount(hedgeCost)}</span></div>}
+      <div style={{ ...lineStyle, ...indent, fontWeight: 500 }}><span>Available for tranches</span><span>{formatAmount(Math.max(0, availableAfterSenior))}</span></div>
+
+      {period.trancheInterest.map((t) => (
+        <div key={t.className} style={{ ...lineStyle, ...indent }}>
+          <span style={labelStyle}>{t.className} interest{t.paid < t.due ? ` (shortfall: ${formatAmount(t.due - t.paid)})` : ""}</span>
+          <span>{t.paid > 0 ? `-${formatAmount(t.paid)}` : "\u2014"}</span>
+        </div>
+      ))}
+
+      {(period.ocTests.length > 0 || period.icTests.length > 0) && (
+        <div style={{ ...lineStyle, ...indent, flexWrap: "wrap", gap: "0.4rem" }}>
+          {period.ocTests.map((t) => (
+            <span key={`oc-${t.className}`} style={{ color: t.passing ? "var(--color-high)" : "var(--color-low)", fontSize: "0.68rem" }}>
+              {t.passing ? "\u2713" : "\u2717"} {t.className} OC {t.actual.toFixed(1)}%
+            </span>
+          ))}
+          {period.icTests.map((t) => (
+            <span key={`ic-${t.className}`} style={{ color: t.passing ? "var(--color-high)" : "var(--color-low)", fontSize: "0.68rem" }}>
+              {t.passing ? "\u2713" : "\u2717"} {t.className} IC {t.actual.toFixed(1)}%
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ ...lineStyle, ...indent }}><span style={{ color: feeColor }}>Sub Mgmt Fee ({inputs.subFeePct}%)</span><span style={{ color: feeColor }}>-{formatAmount(subFee)}</span></div>
+      <div style={dividerStyle} />
+      <div style={{ ...lineStyle, fontWeight: 600 }}><span style={{ color: eqColor }}>Equity (from interest)</span><span style={{ color: eqColor }}>{formatAmount(equityFromInterest)}</span></div>
+
+      <div style={{ fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginTop: "0.75rem", marginBottom: "0.4rem" }}>Principal Waterfall</div>
+      <div style={lineStyle}><span>Prepayments</span><span>{formatAmount(period.prepayments)}</span></div>
+      <div style={lineStyle}><span>Maturities</span><span>{formatAmount(period.scheduledMaturities)}</span></div>
+      <div style={lineStyle}><span>Recoveries</span><span>{formatAmount(period.recoveries)}</span></div>
+      {period.reinvestment > 0 && <div style={{ ...lineStyle, ...indent }}><span style={{ color: feeColor }}>Reinvested</span><span style={{ color: feeColor }}>-{formatAmount(period.reinvestment)}</span></div>}
+      {period.tranchePrincipal.filter((t) => t.paid > 0).map((t) => (
+        <div key={t.className} style={{ ...lineStyle, ...indent }}><span style={labelStyle}>{t.className} principal</span><span>-{formatAmount(t.paid)}</span></div>
+      ))}
+      <div style={dividerStyle} />
+      <div style={{ ...lineStyle, fontWeight: 700 }}><span style={{ color: eqColor }}>Total Equity Distribution</span><span style={{ color: eqColor }}>{formatAmount(period.equityDistribution)}</span></div>
     </div>
   );
 }
