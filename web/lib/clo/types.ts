@@ -77,9 +77,10 @@ export interface CollateralQualityTest {
 export interface FeeEntry {
   name: string;
   rate?: string;
+  rateUnit?: "pct_pa" | "bps_pa" | "pct_of_residual" | "fixed_amount" | "per_agreement" | null;
   basis?: string;
   description?: string;
-  hurdleRate?: string; // For incentive/performance fees: the IRR hurdle threshold (e.g. "12%")
+  hurdleRate?: string;
 }
 
 export interface KeyParty {

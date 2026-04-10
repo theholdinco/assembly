@@ -228,38 +228,47 @@ function resolveFees(constraints: ExtractedConstraints, warnings: ResolutionWarn
     const name = fee.name?.toLowerCase() ?? "";
     const rate = parseFloat(fee.rate ?? "");
     if (isNaN(rate)) continue;
+    const unit = fee.rateUnit ?? null;
+
+    // Helper: convert rate to percentage, handling bps_pa unit or heuristic fallback
+    const toPctPa = (r: number, fieldName: string): number => {
+      if (unit === "bps_pa") {
+        warnings.push({ field: fieldName, message: `Converted ${r} bps to ${r / 100}% (rateUnit: bps_pa)`, severity: "info" });
+        return r / 100;
+      }
+      if (unit === "pct_pa") return r;
+      // No explicit unit — use heuristic: management fees > 5 are almost certainly bps
+      if (r > 5) {
+        warnings.push({ field: fieldName, message: `Fee rate ${r} looks like bps (no rateUnit), converting to ${r / 100}%`, severity: "warn" });
+        return r / 100;
+      }
+      return r;
+    };
 
     if (name.includes("senior") && (name.includes("mgmt") || name.includes("management"))) {
-      if (rate > 5) {
-        warnings.push({ field: "fees.seniorFeePct", message: `Senior fee rate ${rate} looks like bps, converting to ${rate / 100}%`, severity: "warn" });
-        seniorFeePct = rate / 100;
-      } else {
-        seniorFeePct = rate;
-      }
+      seniorFeePct = toPctPa(rate, "fees.seniorFeePct");
     } else if (name.includes("sub") && (name.includes("mgmt") || name.includes("management"))) {
-      if (rate > 5) {
-        warnings.push({ field: "fees.subFeePct", message: `Sub fee rate ${rate} looks like bps, converting to ${rate / 100}%`, severity: "warn" });
-        subFeePct = rate / 100;
-      } else {
-        subFeePct = rate;
-      }
+      subFeePct = toPctPa(rate, "fees.subFeePct");
     } else if (name.includes("trustee") || name.includes("admin")) {
-      if (rate > 50) {
-        warnings.push({ field: "fees.trusteeFeeBps", message: `Trustee fee ${rate} bps seems unusually high`, severity: "warn" });
+      // Trustee fees are in bps — if unit says pct_pa, convert
+      if (unit === "pct_pa") {
+        trusteeFeeBps = rate * 100;
+        warnings.push({ field: "fees.trusteeFeeBps", message: `Converted trustee fee ${rate}% to ${rate * 100} bps (rateUnit: pct_pa)`, severity: "info" });
+      } else {
+        trusteeFeeBps = rate;
       }
-      trusteeFeeBps = rate;
+      if (trusteeFeeBps > 50) {
+        warnings.push({ field: "fees.trusteeFeeBps", message: `Trustee fee ${trusteeFeeBps} bps seems unusually high`, severity: "warn" });
+      }
     } else if (name.includes("incentive") || name.includes("performance")) {
+      incentiveFeePct = rate;
       if (rate > 50) {
         warnings.push({ field: "fees.incentiveFeePct", message: `Incentive fee ${rate}% seems unusually high`, severity: "warn" });
       }
-      incentiveFeePct = rate;
-      // Use the LLM-extracted hurdleRate field
       const hurdleRaw = parseFloat(fee.hurdleRate ?? "");
       if (!isNaN(hurdleRaw) && hurdleRaw > 0) {
-        // hurdleRate is extracted as percentage string (e.g. "12" or "12%")
         incentiveFeeHurdleIrr = hurdleRaw > 1 ? hurdleRaw / 100 : hurdleRaw;
       } else if (incentiveFeePct > 0) {
-        // If incentive fee found but no hurdle extracted, use typical 12% European CLO hurdle
         incentiveFeeHurdleIrr = 0.12;
       }
     }

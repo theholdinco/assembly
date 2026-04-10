@@ -321,6 +321,11 @@ export function ppmCoverageTestsPrompt(): Prompt {
 
 Extract coverage test entries for EACH tranche class: class, parValueRatio (the OC test trigger level), interestCoverageRatio (the IC test trigger level).
 
+CRITICAL — Trigger level format:
+- Extract as PERCENTAGE, e.g. "129.10" for 129.10%. Do NOT extract as a ratio (1.2910).
+- "129.10 per cent" → parValueRatio: "129.10"
+- "120.00%" → interestCoverageRatio: "120.00"
+
 PPM COVERAGE TEST FORMAT:
 - Tests may be in the Definitions section as defined terms (with smart quotes \u201c\u201d):
   \u201cClass A/B Par Value Test\u201d means... "shall not be less than 129.31 per cent."
@@ -330,7 +335,7 @@ PPM COVERAGE TEST FORMAT:
 - Also look for tables with columns like: Class | OC Trigger | IC Trigger
 - NOTE: PPM trigger levels may differ from compliance report values if the deal was refinanced. Extract the PPM values as stated.
 
-Extract reinvestment OC test: trigger level, appliesDuring (e.g., "Reinvestment Period only"), diversionAmount.
+Extract reinvestment OC test: trigger level (as percentage, e.g. "102.95"), appliesDuring (e.g., "Reinvestment Period only"), diversionAmount.
 
 ${COMMON_RULES}`,
     user: `Extract the coverage test definitions from the following markdown text.`,
@@ -411,10 +416,18 @@ CLO FEE STRUCTURE:
 - "Senior Expenses Cap" is a hard cap on total annual non-CM expenses (typically €350,000–€500,000).
 - The Trustee fee is paid under "Agency and Account Bank Agreement".
 
-Extract ALL fees: name, rate, basis, description, hurdleRate.
+Extract ALL fees: name, rate, rateUnit, basis, description, hurdleRate.
+
+CRITICAL — Rate format rules:
+- For management fees (senior/subordinated): extract as PERCENTAGE per annum, e.g. "0.15" for 0.15% p.a. Set rateUnit: "pct_pa".
+- For trustee/admin fees: extract as BASIS POINTS per annum, e.g. "2" for 2 bps. Set rateUnit: "bps_pa".
+- For incentive fees: extract as PERCENTAGE of residual, e.g. "20" for 20%. Set rateUnit: "pct_of_residual".
+- For fixed amount fees: extract as the amount. Set rateUnit: "fixed_amount".
+- If the fee rate is "per agreement" or not quantified: set rate: null, rateUnit: "per_agreement".
+- Always strip units from rate — just the number. "0.15% per annum" → rate: "0.15", rateUnit: "pct_pa"
 
 Additional CLO fees to look for:
-- Incentive Management Fee / Performance Fee — for this fee, also extract the hurdleRate (the IRR threshold above which the fee applies, e.g. "12%")
+- Incentive Management Fee / Performance Fee — also extract hurdleRate (the IRR threshold above which the fee applies, as a percentage e.g. "12" for 12%)
 - Administrative Expenses / Administrative Expense Cap
 - Arrangement Fee
 - Placement Fee
@@ -422,10 +435,11 @@ Additional CLO fees to look for:
 - Legal/Audit Expenses
 
 Fees may be expressed as:
-- Basis points per annum on collateral balance (e.g., "0.15% per annum")
+- Percentage per annum on collateral principal (e.g., "0.15% per annum" → rate: "0.15")
+- Basis points per annum (e.g., "15 basis points" → for mgmt fees: rate: "0.15"; for trustee: rate: "15")
 - Fixed amounts per payment period
 - Percentage of interest/principal proceeds
-- For incentive fees: "X% of residual above Y% IRR threshold" — extract X as rate and Y as hurdleRate
+- For incentive fees: "X% of residual above Y% IRR threshold" — extract X as rate, Y as hurdleRate
 
 Extract account definitions: name, purpose.
 Common accounts: Payment Account, Collection Account, Principal Account, Interest Account, Reserve Account, Expense Account, Custody Account, Hedge Counterparty Collateral Account.

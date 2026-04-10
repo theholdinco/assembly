@@ -409,9 +409,10 @@ export const ppmFeesSchema = z.object({
   fees: z.array(z.object({
     name: z.string().optional(),
     rate: z.string().optional(),
+    rateUnit: z.enum(["pct_pa", "bps_pa", "pct_of_residual", "fixed_amount", "per_agreement"]).nullable().optional(),
     basis: z.string().optional(),
     description: z.string().optional(),
-    hurdleRate: z.string().nullable().optional(), // For incentive/performance fees: IRR hurdle (e.g. "12%")
+    hurdleRate: z.string().nullable().optional(),
   }).passthrough()).optional(),
   accounts: z.array(z.object({
     name: z.string().optional(),
