@@ -89,7 +89,7 @@ export function SwitchSimulator({ resolved, holdings, buyList, userAssumptions }
     const br = runProjection(sr.baseInputs);
     const swr = runProjection(sr.switchedInputs);
     return { switchResult: sr, baseResult: br, switchedResult: swr };
-  }, [resolved, sellLoanIndex, buyLoan, sellPrice, buyPrice, userAssumptions]);
+  }, [resolved, sellLoanIndex, sellParAmount, buyLoan, sellPrice, buyPrice, userAssumptions]);
 
   const inputStyle: React.CSSProperties = {
     width: "100%", padding: "0.4rem 0.5rem", borderRadius: "var(--radius-sm)",
