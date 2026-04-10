@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth-helpers";
 import { query } from "@/lib/db";
 import { decryptApiKey } from "@/lib/crypto";
 import { verifyPanelAccess } from "@/lib/clo/access";
+import { normalizeClassName } from "@/lib/clo/api";
 import { processAnthropicStream } from "@/lib/claude-stream";
 
 export async function POST(request: NextRequest) {
@@ -158,7 +159,7 @@ function summarizeDealContext(ctx: Record<string, any>): string {
     parts.push(`\nTranche Snapshots (${snaps.length}):`);
     for (const s of snaps) {
       const trancheName = trancheById.get(s.trancheId)?.className ?? s.trancheId ?? "?";
-      tranchesWithSnapshots.add(trancheName);
+      tranchesWithSnapshots.add(normalizeClassName(trancheName));
       parts.push(`  ${trancheName}: curBal=${s.currentBalance ?? "NULL"}, beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}`);
     }
   } else {
@@ -167,7 +168,7 @@ function summarizeDealContext(ctx: Record<string, any>): string {
 
   // Flag tranches missing snapshots
   if (tranches && tranches.length > 0) {
-    const missing = tranches.filter((t: any) => !tranchesWithSnapshots.has(t.className));
+    const missing = tranches.filter((t: any) => !tranchesWithSnapshots.has(normalizeClassName(t.className)));
     if (missing.length > 0) {
       parts.push(`\nTranches WITHOUT snapshots: ${missing.map((t: any) => t.className).join(", ")}`);
     }
