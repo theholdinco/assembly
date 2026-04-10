@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import type { ResolvedDealData, ResolvedLoan } from "@/lib/clo/resolver-types";
 import { runProjection } from "@/lib/clo/projection";
 import { applySwitch } from "@/lib/clo/switch-simulator";
-import { DEFAULT_ASSUMPTIONS } from "@/lib/clo/build-projection-inputs";
+import { DEFAULT_ASSUMPTIONS, type UserAssumptions } from "@/lib/clo/build-projection-inputs";
 import { mapToRatingBucket } from "@/lib/clo/rating-mapping";
 
 interface LoanDescription {
@@ -19,6 +19,7 @@ interface Props {
   resolved: ResolvedDealData;
   sellLoan: LoanDescription;
   buyLoan: LoanDescription;
+  assumptions?: UserAssumptions;
 }
 
 function parseSpread(s: string): number {
@@ -52,7 +53,7 @@ function formatAmount(v: number): string {
   return `€${v.toFixed(0)}`;
 }
 
-export default function SwitchWaterfallImpact({ resolved, sellLoan, buyLoan }: Props) {
+export default function SwitchWaterfallImpact({ resolved, sellLoan, buyLoan, assumptions }: Props) {
   const [sellPrice, setSellPrice] = useState(100);
   const [buyPrice, setBuyPrice] = useState(100);
   const [expanded, setExpanded] = useState(false);
@@ -83,7 +84,7 @@ export default function SwitchWaterfallImpact({ resolved, sellLoan, buyLoan }: P
     return applySwitch(
       resolved,
       { sellLoanIndex: sellIndex, buyLoan: buyResolvedLoan, sellPrice, buyPrice },
-      DEFAULT_ASSUMPTIONS,
+      assumptions ?? DEFAULT_ASSUMPTIONS,
     );
   }, [resolved, sellIndex, buyResolvedLoan, sellPrice, buyPrice]);
 
