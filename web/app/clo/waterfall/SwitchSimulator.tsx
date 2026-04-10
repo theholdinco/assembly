@@ -65,7 +65,7 @@ export function SwitchSimulator({ resolved, holdings, buyList, userAssumptions }
       setBuyRating(mapToRatingBucket(item.moodysRating ?? null, item.spRating ?? null, null, null));
     }
     if (item.maturityDate) setBuyMaturity(item.maturityDate);
-    // Don't pre-fill par from facilitySize — it's the full syndicated facility, not the CLO allocation
+    if (item.facilitySize) setBuyParAmount(item.facilitySize);
   };
 
   const buyLoan: ResolvedLoan = useMemo(() => ({
@@ -102,25 +102,29 @@ export function SwitchSimulator({ resolved, holdings, buyList, userAssumptions }
         onSelect={setSellLoanIndex}
       />
 
-      {/* Buy loan */}
+      {/* Buy loan — from buy list or manual entry */}
+      {buyList.length > 0 && (
+        <BuyLoanSelector
+          buyList={buyList}
+          onSelect={handleBuyListSelect}
+        />
+      )}
       <div style={{ marginBottom: "1.25rem" }}>
-        <div style={labelStyle}>Buy Loan</div>
-        {buyList.length > 0 && (
-          <div style={{ marginBottom: "0.75rem" }}>
-            <div style={{ fontSize: "0.65rem", color: "var(--color-text-muted)", marginBottom: "0.3rem" }}>From buy list (pre-fills fields below)</div>
-            <select onChange={(e) => { const item = buyList[parseInt(e.target.value)]; if (item) handleBuyListSelect(item); }} style={{ ...inputStyle, maxWidth: "32rem" }} defaultValue="">
-              <option value="">Pick from buy list...</option>
-              {buyList.map((item, i) => (
-                <option key={item.id} value={i}>{item.obligorName} — {item.spreadBps ?? "?"} bps — {item.moodysRating ?? item.spRating ?? "NR"}</option>
-              ))}
-            </select>
+        <div style={{ border: "1px solid var(--color-border-light)", borderRadius: "var(--radius-sm)", padding: "0.75rem", background: "var(--color-surface)" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
+            {buyList.length > 0 ? "Buy Loan Details" : "Buy Loan"}
           </div>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem", maxWidth: "32rem" }}>
-          <div><div style={labelStyle}>Spread (bps)</div><input type="number" value={buySpreadBps} onChange={(e) => setBuySpreadBps(parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
-          <div><div style={labelStyle}>Rating</div><select value={buyRating} onChange={(e) => setBuyRating(e.target.value)} style={inputStyle}>{RATING_BUCKETS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
-          <div><div style={labelStyle}>Maturity</div><input type="date" value={buyMaturity} onChange={(e) => setBuyMaturity(e.target.value)} style={inputStyle} /></div>
-          <div><div style={labelStyle}>Par Amount</div><input type="number" value={buyParAmount} onChange={(e) => setBuyParAmount(parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+          {buyList.length > 0 && (
+            <div style={{ fontSize: "0.62rem", color: "var(--color-text-muted)", marginBottom: "0.5rem", opacity: 0.8 }}>
+              Pre-filled from buy list selection above. Adjust any field to override.
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem" }}>
+            <div><div style={labelStyle}>Spread (bps)</div><input type="number" value={buySpreadBps} onChange={(e) => setBuySpreadBps(parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+            <div><div style={labelStyle}>Rating</div><select value={buyRating} onChange={(e) => setBuyRating(e.target.value)} style={inputStyle}>{RATING_BUCKETS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
+            <div><div style={labelStyle}>Maturity</div><input type="date" value={buyMaturity} onChange={(e) => setBuyMaturity(e.target.value)} style={inputStyle} /></div>
+            <div><div style={labelStyle}>Par Amount</div><input type="number" value={buyParAmount} onChange={(e) => setBuyParAmount(parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+          </div>
         </div>
       </div>
 
@@ -311,6 +315,89 @@ function LoanSelector({
                     <div style={{ fontWeight: 600 }}>{h.name}</div>
                     <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem", marginTop: "0.15rem" }}>
                       {h.loan.ratingBucket} · {h.loan.spreadBps} bps · {formatAmount(h.loan.parBalance)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BuyLoanSelector({
+  buyList,
+  onSelect,
+}: {
+  buyList: BuyListItem[];
+  onSelect: (item: BuyListItem) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const query = search.toLowerCase();
+  const filtered = query
+    ? buyList.filter((item) =>
+        item.obligorName.toLowerCase().includes(query) ||
+        (item.sector?.toLowerCase().includes(query) ?? false) ||
+        (item.moodysRating?.toLowerCase().includes(query) ?? false) ||
+        (item.spRating?.toLowerCase().includes(query) ?? false)
+      )
+    : buyList;
+
+  const selected = selectedId ? buyList.find((b) => b.id === selectedId) : null;
+
+  const formatRating = (item: BuyListItem) =>
+    [item.moodysRating, item.spRating].filter(Boolean).join("/") || "NR";
+
+  const formatSize = (item: BuyListItem) => {
+    if (!item.facilitySize) return "";
+    return item.facilitySize >= 1_000_000 ? `€${(item.facilitySize / 1_000_000).toFixed(1)}M` : `€${(item.facilitySize / 1_000).toFixed(0)}K`;
+  };
+
+  return (
+    <div style={{ marginBottom: "1.25rem" }}>
+      <div style={{ border: "1px solid var(--color-border-light)", borderRadius: "var(--radius-sm)", padding: "0.75rem", background: "var(--color-surface)" }}>
+        <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Buy Loan (from buy list)</div>
+        {selected && !open ? (
+          <button
+            onClick={() => { setOpen(true); setSearch(""); }}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "0.5rem", border: "1px solid var(--color-border-light)", borderRadius: "var(--radius-sm)", background: "var(--color-surface)", cursor: "pointer", fontSize: "0.85rem" }}
+          >
+            <div style={{ fontWeight: 600 }}>{selected.obligorName}</div>
+            <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem", marginTop: "0.15rem" }}>
+              {[selected.sector, formatRating(selected), selected.spreadBps ? `${selected.spreadBps} bps` : null, formatSize(selected)].filter(Boolean).join(" · ")}
+            </div>
+          </button>
+        ) : (
+          <>
+            <input
+              type="text"
+              placeholder="Search by name, sector, or rating..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setOpen(true)}
+              style={{ width: "100%", padding: "0.4rem 0.5rem", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border-light)", fontSize: "0.8rem", marginBottom: "0.4rem", background: "var(--color-surface)", color: "var(--color-text)" }}
+            />
+            {open && (
+              <div style={{ maxHeight: "240px", overflowY: "auto" }}>
+                {filtered.length === 0 && (
+                  <div style={{ padding: "0.5rem", color: "var(--color-text-muted)", fontSize: "0.8rem" }}>No matching items</div>
+                )}
+                {filtered.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => { onSelect(item); setSelectedId(item.id); setOpen(false); setSearch(""); }}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "0.5rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: item.id === selectedId ? "var(--color-surface-alt, rgba(128,128,128,0.08))" : "transparent", cursor: "pointer", fontSize: "0.85rem", color: "var(--color-text)", borderRadius: 0 }}
+                    onMouseEnter={(e) => { if (item.id !== selectedId) e.currentTarget.style.background = "var(--color-surface-alt, rgba(128,128,128,0.05))"; }}
+                    onMouseLeave={(e) => { if (item.id !== selectedId) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{item.obligorName}</div>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.75rem", marginTop: "0.15rem" }}>
+                      {[item.sector, formatRating(item), item.spreadBps ? `${item.spreadBps} bps` : null, formatSize(item)].filter(Boolean).join(" · ")}
                     </div>
                   </button>
                 ))}
