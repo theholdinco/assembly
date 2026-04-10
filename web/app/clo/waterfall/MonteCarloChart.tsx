@@ -53,28 +53,37 @@ function OcFailureSection({ result }: { result: MonteCarloResult }) {
   const ocClasses = Object.keys(result.ocFailureByQuarter[0]?.byClass ?? {});
 
   return (
-    <div style={{ marginTop: "0.75rem" }}>
+    <div style={{
+      marginTop: "0.75rem",
+      border: "1px solid var(--color-border-light)",
+      borderRadius: "var(--radius-sm)",
+      background: "var(--color-surface)",
+    }}>
       <button
         onClick={() => setExpanded(!expanded)}
         style={{
+          width: "100%",
           background: "none",
           border: "none",
           cursor: "pointer",
-          padding: 0,
+          padding: "0.6rem 0.8rem",
           fontSize: "0.8rem",
+          fontWeight: 600,
           color: "var(--color-text-secondary)",
           display: "flex",
           alignItems: "center",
           gap: "0.4rem",
+          textAlign: "left",
+          fontFamily: "var(--font-body)",
         }}
       >
         <span style={{ fontSize: "0.65rem" }}>{expanded ? "▾" : "▸"}</span>
-        OC stress: <strong>{stressLabel}</strong>
-        <span style={{ color: "var(--color-text-muted)" }}>({peak.toFixed(1)}% peak failure rate)</span>
+        OC Stress: {stressLabel}
+        <span style={{ fontWeight: 400, color: "var(--color-text-muted)" }}>({peak.toFixed(1)}% peak failure rate)</span>
       </button>
 
       {expanded && (
-        <div style={{ marginTop: "0.5rem" }}>
+        <div style={{ padding: "0 0.8rem 0.8rem" }}>
           <ResponsiveContainer width="100%" height={140}>
             <AreaChart data={result.ocFailureByQuarter} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <XAxis

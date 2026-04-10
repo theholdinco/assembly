@@ -971,8 +971,9 @@ function ModelAssumptions() {
           background: "none",
           border: "none",
           cursor: "pointer",
-          fontSize: "0.75rem",
-          color: "var(--color-text-muted)",
+          fontSize: "0.8rem",
+          fontWeight: 600,
+          color: "var(--color-text-secondary)",
           textAlign: "left",
           fontFamily: "var(--font-body)",
         }}
