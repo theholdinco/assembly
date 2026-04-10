@@ -474,12 +474,12 @@ export async function runExtraction(
 
     if (normalized.trancheSnapshots.length > 0) {
       await query("DELETE FROM clo_tranche_snapshots WHERE report_period_id = $1", [reportPeriodId]);
+      const allTranches = await query<{ id: string; class_name: string }>(
+        "SELECT id, class_name FROM clo_tranches WHERE deal_id = $1",
+        [dealId],
+      );
       for (const snapshot of normalized.trancheSnapshots) {
         const normalizedName = normalizeClassName(snapshot.className);
-        const allTranches = await query<{ id: string; class_name: string }>(
-          "SELECT id, class_name FROM clo_tranches WHERE deal_id = $1",
-          [dealId],
-        );
         let existing = allTranches.filter((t) => normalizeClassName(t.class_name) === normalizedName);
 
         if (existing.length === 0) {
@@ -487,6 +487,8 @@ export async function runExtraction(
             `INSERT INTO clo_tranches (deal_id, class_name) VALUES ($1, $2) RETURNING id, class_name`,
             [dealId, snapshot.className],
           );
+          // Keep hoisted cache in sync so subsequent iterations can find this tranche
+          allTranches.push(...existing);
         }
 
         // Remap aliases + filter to known columns (same as section-based path)
@@ -879,7 +881,11 @@ export async function runSectionExtraction(
 
   // Extract reportDate from compliance_summary
   const summarySection = sections.compliance_summary as Record<string, unknown> | null;
-  const reportDate = (summarySection?.reportDate as string) ?? new Date().toISOString().slice(0, 10);
+  const reportDate = summarySection?.reportDate as string | undefined;
+  if (!reportDate) {
+    console.error(`[extraction] CRITICAL: no reportDate found in compliance_summary — cannot file data under correct period. Aborting section-based extraction.`);
+    throw new Error("No reportDate found in compliance_summary section — extraction cannot proceed without a report date");
+  }
   console.log(`[extraction] reportDate=${reportDate}`);
 
   // Get or create deal, create report period
@@ -1000,19 +1006,20 @@ export async function runSectionExtraction(
     }
     console.log(`[extraction] ════════════════════════`);
     await query("DELETE FROM clo_tranche_snapshots WHERE report_period_id = $1", [reportPeriodId]);
+    const allTranchesSection = await query<{ id: string; class_name: string }>(
+      "SELECT id, class_name FROM clo_tranches WHERE deal_id = $1",
+      [dealId],
+    );
     for (const snapshot of normalized.trancheSnapshots) {
       const normalizedName = normalizeClassName(snapshot.className);
-      const allTranches = await query<{ id: string; class_name: string }>(
-        "SELECT id, class_name FROM clo_tranches WHERE deal_id = $1",
-        [dealId],
-      );
-      let existing = allTranches.filter((t) => normalizeClassName(t.class_name) === normalizedName);
+      let existing = allTranchesSection.filter((t) => normalizeClassName(t.class_name) === normalizedName);
 
       if (existing.length === 0) {
         existing = await query<{ id: string; class_name: string }>(
           `INSERT INTO clo_tranches (deal_id, class_name) VALUES ($1, $2) RETURNING id, class_name`,
           [dealId, snapshot.className],
         );
+        allTranchesSection.push(...existing);
       }
 
       // Remap aliases + filter to known columns
@@ -1041,8 +1048,11 @@ export async function runSectionExtraction(
       }
       // Set spread_bps from compliance report if PPM didn't set it
       if (spreadFromReport != null && typeof spreadFromReport === "number") {
-        // Guard: if AI returned percentage (e.g., 1.45) instead of bps (145), convert
-        const spreadBps = spreadFromReport > 0 && spreadFromReport < 20
+        // Guard: if AI returned percentage (e.g., 1.45) instead of bps (145), convert.
+        // Threshold at 5: spreads below 5 are almost certainly percentages (e.g. 1.45% = 145bps).
+        // Values 5-20 could be either bps or %, but CLO tranche spreads at 5-20 bps are
+        // extremely rare, so treating them as percentages is safer.
+        const spreadBps = spreadFromReport > 0 && spreadFromReport < 5
           ? Math.round(spreadFromReport * 100)
           : spreadFromReport;
         enrichClauses.push(`spread_bps = COALESCE(spread_bps, $${ei++})`);

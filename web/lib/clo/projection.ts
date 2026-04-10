@@ -469,7 +469,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
       const interestDueAtAndAbove = ocEligibleTranches
         .filter((t) => t.seniorityRank <= ic.rank)
         .reduce((s, t) => s + bopTrancheBalances[t.className] * trancheCouponRate(t, baseRatePct) / 4, 0);
-      const actual = interestDueAtAndAbove > 0 ? (interestCollected / interestDueAtAndAbove) * 100 : 999;
+      const actual = interestDueAtAndAbove > 0 ? (interestAfterFees / interestDueAtAndAbove) * 100 : 999;
       const passing = actual >= ic.triggerLevel;
       icResults.push({ className: ic.className, actual, trigger: ic.triggerLevel, passing });
     }
@@ -738,6 +738,7 @@ export function calculateIrr(cashFlows: number[], periodsPerYear: number = 4): n
   // Newton-Raphson on periodic rate, then annualize
   let rate = 0.05;
 
+  let converged = false;
   for (let iter = 0; iter < 200; iter++) {
     let npv = 0;
     let dNpv = 0;
@@ -750,6 +751,7 @@ export function calculateIrr(cashFlows: number[], periodsPerYear: number = 4): n
     const newRate = rate - npv / dNpv;
     if (Math.abs(newRate - rate) < 1e-9) {
       rate = newRate;
+      converged = true;
       break;
     }
     rate = newRate;
@@ -757,6 +759,8 @@ export function calculateIrr(cashFlows: number[], periodsPerYear: number = 4): n
     if (rate < -0.99) rate = -0.99;
     if (rate > 10) rate = 10;
   }
+
+  if (!converged) return null;
 
   // Annualize: (1 + periodic)^periodsPerYear - 1
   const annualized = Math.pow(1 + rate, periodsPerYear) - 1;

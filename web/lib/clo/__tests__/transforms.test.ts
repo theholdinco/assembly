@@ -111,13 +111,13 @@ describe("mergeChunkResults", () => {
     expect(merged.data?.holdings).toEqual([1, 2, 3, 4]);
   });
 
-  it("prefers first non-null scalar value", () => {
+  it("prefers last non-null scalar value (later chunks have corrected data)", () => {
     const results = [
       { data: { name: "first", count: null }, truncated: false },
       { data: { name: "second", count: 42 }, truncated: false },
     ];
     const merged = mergeChunkResults(results);
-    expect(merged.data?.name).toBe("first");
+    expect(merged.data?.name).toBe("second");
     expect(merged.data?.count).toBe(42);
   });
 

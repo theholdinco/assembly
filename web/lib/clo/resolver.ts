@@ -142,7 +142,20 @@ function resolveTranches(
     }
   }
 
-  return Array.from(byClass.values()).map((e, idx) => {
+  // Sort by class letter to ensure correct seniority regardless of LLM extraction order.
+  // Standard CLO classes: X, A, B, C, D, E, F, then subordinated/equity last.
+  const classOrder = (e: typeof entries[number]): number => {
+    const name = e.class.replace(/^class\s+/i, "").trim().toLowerCase();
+    if (/^x$/i.test(name)) return 0;
+    if (e.isSubordinated || name.includes("sub") || name.includes("equity") || name.includes("income")) return 100;
+    // Single letter classes (A=1, B=2, ..., F=6) — handles "A-1", "A-2" etc.
+    const letter = name.match(/^([a-z])/)?.[1];
+    if (letter) return letter.charCodeAt(0) - 96; // a=1, b=2, ...
+    return 50; // unknown → middle
+  };
+  const sortedEntries = Array.from(byClass.values()).sort((a, b) => classOrder(a) - classOrder(b));
+
+  return sortedEntries.map((e, idx) => {
     const isSub = e.isSubordinated ?? e.class.toLowerCase().includes("sub");
     const isFloating = e.rateType
       ? e.rateType.toLowerCase().includes("float")
@@ -223,12 +236,17 @@ function resolveTriggers(
 
   const oc: ResolvedTrigger[] = dedupTriggers(ocRaw, warnings).map(t => {
     let triggerLevel = t.triggerLevel;
-    // Values < 2 are almost certainly ratios (e.g. 1.05 → 105%). Values 2–10
-    // are ambiguous but rare for OC triggers — warn but still convert.
-    // Values >= 10 are treated as percentages (e.g. 105.0% stays 105.0%).
+    // Values < 10 are almost certainly ratios (e.g. 1.05 → 105%).
+    // Values >= 90 are treated as percentages (e.g. 105.0% stays 105.0%).
+    // Values 10–90 are in no-man's land: no real OC trigger is 10-90%.
+    // Both interpretations (as-is = too low, ×100 = too high) are wrong,
+    // so we warn at error severity and leave as-is (perpetually-passing is
+    // safer than perpetually-failing, which would wipe out equity).
     if (triggerLevel > 0 && triggerLevel < 10) {
       triggerLevel = triggerLevel * 100;
       warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${t.triggerLevel} looks like a ratio, converting to ${triggerLevel}%`, severity: "warn" });
+    } else if (triggerLevel >= 10 && triggerLevel < 90) {
+      warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${triggerLevel}% for ${t.className} is implausible — no CLO OC trigger is 10-90%. Check extraction and set manually.`, severity: "error" });
     }
     if (triggerLevel > 200) {
       warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${triggerLevel}% for ${t.className} seems unusually high`, severity: "warn" });

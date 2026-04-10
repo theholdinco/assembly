@@ -43,12 +43,19 @@ export function applySwitch(
   const adjustedBuyLoan: ResolvedLoan = { ...buyLoan, parBalance: parBought };
   switchedLoans[switchedLoans.length - 1] = adjustedBuyLoan;
 
+  // Recalculate WAC spread from the updated loan list
+  const switchedTotalPar = switchedLoans.reduce((s, l) => s + l.parBalance, 0);
+  const switchedWacSpreadBps = switchedTotalPar > 0
+    ? switchedLoans.reduce((s, l) => s + l.spreadBps * l.parBalance, 0) / switchedTotalPar
+    : resolved.poolSummary.wacSpreadBps;
+
   const switchedResolved: ResolvedDealData = {
     ...resolved,
     loans: switchedLoans,
     poolSummary: {
       ...resolved.poolSummary,
       totalPar: resolved.poolSummary.totalPar + parDelta,
+      wacSpreadBps: switchedWacSpreadBps,
     },
   };
 

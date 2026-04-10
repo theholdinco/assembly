@@ -218,8 +218,10 @@ export function validateExtraction(
       if (t.numerator != null && t.denominator != null && t.denominator !== 0 && t.actualValue != null) {
         ocCheckRan = true;
         ocTotal++;
-        const calculated = (t.numerator / t.denominator) * 100;
-        if (absDiff(calculated, t.actualValue) > 0.1) {
+        const calculatedPct = (t.numerator / t.denominator) * 100;
+        // Handle both percentage (e.g. 124.5) and ratio (e.g. 1.245) units for actualValue
+        const actualAsPct = t.actualValue < 10 ? t.actualValue * 100 : t.actualValue;
+        if (absDiff(calculatedPct, actualAsPct) > 0.1) {
           ocFailures++;
         }
       }

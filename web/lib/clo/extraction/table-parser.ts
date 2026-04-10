@@ -116,17 +116,24 @@ export function parseDate(cell: string | null | undefined): string | null {
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
 
-  // MM/DD/YYYY or M/D/YYYY (US format, common in BNY Mellon reports)
-  const slashMdy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slashMdy) {
-    return `${slashMdy[3]}-${slashMdy[1].padStart(2, "0")}-${slashMdy[2].padStart(2, "0")}`;
+  // Slash-delimited dates: could be MM/DD/YYYY (US) or DD/MM/YYYY (European).
+  // Disambiguate: if first part > 12, it must be DD (European format).
+  const slashDate = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashDate) {
+    const [, a, b, year] = slashDate;
+    if (parseInt(a, 10) > 12) {
+      // Must be DD/MM/YYYY (European) — first part can't be a month
+      return `${year}-${b.padStart(2, "0")}-${a.padStart(2, "0")}`;
+    }
+    // Assume MM/DD/YYYY (US format, common in BNY Mellon reports)
+    return `${year}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
   }
 
   return null;
 }
 
 export function isHeaderRow(row: string[]): boolean {
-  const headerKeywords = ["test name", "class", "description", "security id", "type", "numerator", "denominator", "isin", "obligor", "original balance", "current balance", "spread", "coupon rate", "par balance", "maturity"];
+  const headerKeywords = ["test name", "class name", "class a", "class b", "description", "security id", "type", "numerator", "denominator", "isin", "obligor", "original balance", "current balance", "spread", "coupon rate", "par balance", "maturity"];
   const text = row.join(" ").toLowerCase();
   return headerKeywords.some((kw) => text.includes(kw));
 }

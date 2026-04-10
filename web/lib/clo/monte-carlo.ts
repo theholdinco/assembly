@@ -85,14 +85,11 @@ export function runMonteCarlo(
   const sortedDists = new Float64Array(equityDists);
   sortedDists.sort();
 
-  // Compute mean IRR (excluding nulls represented as -Infinity)
+  // Compute mean IRR: total-loss scenarios (stored as -Infinity) are counted
+  // as -100% IRR to avoid biasing the mean upward by excluding them.
   let irrSum = 0;
-  let irrCount = 0;
   for (let i = 0; i < irrs.length; i++) {
-    if (isFinite(irrs[i])) {
-      irrSum += irrs[i];
-      irrCount++;
-    }
+    irrSum += isFinite(irrs[i]) ? irrs[i] : -1;
   }
 
   const ocFailureByQuarter = Array.from(ocFailureCounts).map((count, q) => {
@@ -114,7 +111,7 @@ export function runMonteCarlo(
       p75: percentile(sortedIrrs, 0.75),
       p95: percentile(sortedIrrs, 0.95),
     },
-    meanIrr: irrCount > 0 ? irrSum / irrCount : 0,
+    meanIrr: runCount > 0 ? irrSum / runCount : 0,
     ocFailureByQuarter,
     peakOcFailurePct,
     medianEquityDistributions: percentile(sortedDists, 0.50),

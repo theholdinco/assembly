@@ -61,11 +61,14 @@ function normalizeTestClass(name: string): string {
     .toLowerCase();
 }
 
-/** Build a dedup key from test name + class */
-function testDedupKey(t: { testName: string; testClass?: string | null }): string {
+/** Build a dedup key from test name + class.
+ *  When testClass is null, include testType to prevent collapsing OC/IC tests
+ *  that share the same name but apply to different test categories. */
+function testDedupKey(t: { testName: string; testClass?: string | null; testType?: string | null }): string {
   const name = t.testName.toLowerCase().replace(/\s+/g, " ").trim();
   const cls = t.testClass ? normalizeTestClass(t.testClass) : "";
-  return `${name}|${cls}`;
+  const type = t.testType ?? "";
+  return `${name}|${cls}|${type}`;
 }
 
 /** Score a test entry by data completeness (higher = more complete) */

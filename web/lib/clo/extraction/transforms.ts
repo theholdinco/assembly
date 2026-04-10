@@ -112,6 +112,10 @@ export function mergeChunkResults(
           merged[key] = [...baseVal, ...val];
         } else if (merged[key] == null) {
           merged[key] = val;
+        } else if (!Array.isArray(val) && !Array.isArray(baseVal)) {
+          // For scalars, later chunks win — later pages in the document
+          // are more likely to contain updated/corrected values.
+          merged[key] = val;
         }
       }
     }
