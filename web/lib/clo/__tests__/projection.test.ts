@@ -9,6 +9,7 @@ import {
   LoanInput,
 } from "../projection";
 import { RATING_BUCKETS, DEFAULT_RATES_BY_RATING } from "../rating-mapping";
+import { CLO_DEFAULTS } from "../defaults";
 
 // Helper: set all rating buckets to the same CDR (equivalent to old single cdrPct)
 function uniformRates(cdr: number): Record<string, number> {
@@ -27,9 +28,9 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
   return {
     initialPar: 100_000_000,
     wacSpreadBps: 375,
-    baseRatePct: 4.5,
-    seniorFeePct: 0.45,
-    subFeePct: 0.50,
+    baseRatePct: CLO_DEFAULTS.baseRatePct,
+    seniorFeePct: CLO_DEFAULTS.seniorFeePct,
+    subFeePct: CLO_DEFAULTS.subFeePct,
     tranches: [
       { className: "A", currentBalance: 65_000_000, spreadBps: 140, seniorityRank: 1, isFloating: true, isIncomeNote: false, isDeferrable: false },
       { className: "B", currentBalance: 15_000_000, spreadBps: 250, seniorityRank: 2, isFloating: true, isIncomeNote: false, isDeferrable: true },
@@ -48,14 +49,14 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
     currentDate: "2026-03-09",
     loans: defaultLoans,
     defaultRatesByRating: { ...DEFAULT_RATES_BY_RATING },
-    cprPct: 15,
-    recoveryPct: 60,
-    recoveryLagMonths: 12,
-    reinvestmentSpreadBps: 350,
-    reinvestmentTenorQuarters: 20,
+    cprPct: CLO_DEFAULTS.cprPct,
+    recoveryPct: CLO_DEFAULTS.recoveryPct,
+    recoveryLagMonths: CLO_DEFAULTS.recoveryLagMonths,
+    reinvestmentSpreadBps: CLO_DEFAULTS.reinvestmentSpreadBps,
+    reinvestmentTenorQuarters: CLO_DEFAULTS.reinvestmentTenorYears * 4,
     reinvestmentRating: null,
-    cccBucketLimitPct: 7.5,
-    cccMarketValuePct: 70,
+    cccBucketLimitPct: CLO_DEFAULTS.cccBucketLimitPct,
+    cccMarketValuePct: CLO_DEFAULTS.cccMarketValuePct,
     deferredInterestCompounds: true,
     trusteeFeeBps: 0,
     hedgeCostBps: 0,

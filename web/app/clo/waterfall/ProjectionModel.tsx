@@ -24,6 +24,7 @@ import type { ResolvedDealData, ResolutionWarning } from "@/lib/clo/resolver-typ
 import { buildFromResolved } from "@/lib/clo/build-projection-inputs";
 import { DEFAULT_RATES_BY_RATING, RATING_BUCKETS, type RatingBucket } from "@/lib/clo/rating-mapping";
 import SuggestAssumptions from "./SuggestAssumptions";
+import { CLO_DEFAULTS } from "@/lib/clo/defaults";
 import { useMonteCarlo } from "@/lib/clo/useMonteCarlo";
 import MonteCarloChart from "./MonteCarloChart";
 
@@ -145,17 +146,17 @@ export default function ProjectionModel({
   const unmappedIc = icTriggers.filter((ic) => ic.rank === 0);
 
   const [defaultRates, setDefaultRates] = useState<Record<string, number>>({ ...DEFAULT_RATES_BY_RATING });
-  const [cprPct, setCprPct] = useState(15);
-  const [recoveryPct, setRecoveryPct] = useState(60);
-  const [recoveryLagMonths, setRecoveryLagMonths] = useState(12);
-  const [reinvestmentSpreadBps, setReinvestmentSpreadBps] = useState(350);
-  const [reinvestmentTenorYears, setReinvestmentTenorYears] = useState(5);
+  const [cprPct, setCprPct] = useState<number>(CLO_DEFAULTS.cprPct);
+  const [recoveryPct, setRecoveryPct] = useState<number>(CLO_DEFAULTS.recoveryPct);
+  const [recoveryLagMonths, setRecoveryLagMonths] = useState<number>(CLO_DEFAULTS.recoveryLagMonths);
+  const [reinvestmentSpreadBps, setReinvestmentSpreadBps] = useState<number>(CLO_DEFAULTS.reinvestmentSpreadBps);
+  const [reinvestmentTenorYears, setReinvestmentTenorYears] = useState<number>(CLO_DEFAULTS.reinvestmentTenorYears);
   const [reinvestmentRating, setReinvestmentRating] = useState<string>("auto");
-  const [baseRatePct, setBaseRatePct] = useState(4.5);
-  const [seniorFeePct, setSeniorFeePct] = useState(0.45);
-  const [subFeePct, setSubFeePct] = useState(0.20);
-  const [cccBucketLimitPct, setCccBucketLimitPct] = useState(7.5);
-  const [cccMarketValuePct, setCccMarketValuePct] = useState(70);
+  const [baseRatePct, setBaseRatePct] = useState<number>(CLO_DEFAULTS.baseRatePct);
+  const [seniorFeePct, setSeniorFeePct] = useState<number>(CLO_DEFAULTS.seniorFeePct);
+  const [subFeePct, setSubFeePct] = useState<number>(CLO_DEFAULTS.subFeePct);
+  const [cccBucketLimitPct, setCccBucketLimitPct] = useState<number>(CLO_DEFAULTS.cccBucketLimitPct);
+  const [cccMarketValuePct, setCccMarketValuePct] = useState<number>(CLO_DEFAULTS.cccMarketValuePct);
   const [showTransparency, setShowTransparency] = useState(false);
   const [expandedPeriod, setExpandedPeriod] = useState<number | null>(null);
 

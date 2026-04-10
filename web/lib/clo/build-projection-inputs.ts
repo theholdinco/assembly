@@ -1,5 +1,6 @@
 import type { ResolvedDealData } from "./resolver-types";
 import type { ProjectionInputs } from "./projection";
+import { CLO_DEFAULTS } from "./defaults";
 
 export interface UserAssumptions {
   baseRatePct: number;
@@ -19,7 +20,7 @@ export interface UserAssumptions {
 }
 
 export const DEFAULT_ASSUMPTIONS: UserAssumptions = {
-  baseRatePct: 2.0,
+  baseRatePct: CLO_DEFAULTS.baseRatePct,
   defaultRates: {
     AAA: 0,
     AA: 0.02,
@@ -30,14 +31,14 @@ export const DEFAULT_ASSUMPTIONS: UserAssumptions = {
     CCC: 10.28,
     NR: 2.0,
   },
-  cprPct: 15,
-  recoveryPct: 60,
-  recoveryLagMonths: 12,
-  reinvestmentSpreadBps: 350,
-  reinvestmentTenorYears: 5,
+  cprPct: CLO_DEFAULTS.cprPct,
+  recoveryPct: CLO_DEFAULTS.recoveryPct,
+  recoveryLagMonths: CLO_DEFAULTS.recoveryLagMonths,
+  reinvestmentSpreadBps: CLO_DEFAULTS.reinvestmentSpreadBps,
+  reinvestmentTenorYears: CLO_DEFAULTS.reinvestmentTenorYears,
   reinvestmentRating: null,
-  cccBucketLimitPct: 7.5,
-  cccMarketValuePct: 70,
+  cccBucketLimitPct: CLO_DEFAULTS.cccBucketLimitPct,
+  cccMarketValuePct: CLO_DEFAULTS.cccMarketValuePct,
   deferredInterestCompounds: true,
   postRpReinvestmentPct: 0,
   hedgeCostBps: 0,

@@ -2,6 +2,7 @@ import type { ExtractedConstraints, CloPoolSummary, CloComplianceTest, CloTranch
 import type { ResolvedDealData, ResolvedTranche, ResolvedPool, ResolvedTrigger, ResolvedReinvestmentOcTrigger, ResolvedDates, ResolvedFees, ResolvedLoan, ResolutionWarning } from "./resolver-types";
 import { parseSpreadToBps, normalizeWacSpread } from "./ingestion-gate";
 import { mapToRatingBucket } from "./rating-mapping";
+import { CLO_DEFAULTS } from "./defaults";
 
 function normClass(s: string): string {
   const base = s.replace(/^class\s+/i, "").replace(/\s+notes?$/i, "").trim().toLowerCase();
@@ -218,11 +219,11 @@ function resolveTriggers(
 }
 
 function resolveFees(constraints: ExtractedConstraints, warnings: ResolutionWarning[]): ResolvedFees {
-  let seniorFeePct = 0.15;
-  let subFeePct = 0.25;
-  let trusteeFeeBps = 2; // typical European CLO trustee fee
-  let incentiveFeePct = 0; // default off — only applied when explicitly found in PPM
-  let incentiveFeeHurdleIrr = 0; // no hurdle by default
+  let seniorFeePct: number = CLO_DEFAULTS.seniorFeePct;
+  let subFeePct: number = CLO_DEFAULTS.subFeePct;
+  let trusteeFeeBps: number = CLO_DEFAULTS.trusteeFeeBps;
+  let incentiveFeePct: number = CLO_DEFAULTS.incentiveFeePct;
+  let incentiveFeeHurdleIrr: number = CLO_DEFAULTS.incentiveFeeHurdleIrr;
 
   for (const fee of constraints.fees ?? []) {
     const name = fee.name?.toLowerCase() ?? "";
