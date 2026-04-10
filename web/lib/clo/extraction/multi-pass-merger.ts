@@ -16,7 +16,7 @@ export { EXTRACTION_PASSES };
 
 // Section-specific dedup key functions
 const DEDUP_KEYS: Record<string, (item: Record<string, unknown>) => string> = {
-  holdings: (h) => `${norm(h.obligorName)}|${norm(h.lxid ?? h.isin ?? h.securityId)}`,
+  holdings: (h) => `${norm(h.obligorName)}|${norm(h.isin ?? h.lxid ?? h.securityId)}`,
   tests: (t) => norm(t.testName),
   parValueAdjustments: (a) => `${norm(a.testName)}|${norm(a.adjustmentType)}`,
   concentrations: (c) => `${norm(c.concentrationType)}|${norm(c.bucketName)}`,

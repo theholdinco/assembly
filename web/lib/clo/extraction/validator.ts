@@ -152,7 +152,7 @@ export function validateExtraction(
     const industryBuckets = concentrations.filter((c) => c.concentrationType === "INDUSTRY");
     const maxIndustryPct = industryBuckets.reduce((max, c) => Math.max(max, c.actualPct ?? 0), 0);
     const industryTests = tests.filter((t) =>
-      t.testType === "CONCENTRATION" && t.testName?.toLowerCase().includes("industry")
+      t.testType?.toUpperCase() === "CONCENTRATION" && t.testName?.toLowerCase().includes("industry")
     );
     if (maxIndustryPct > 0 && industryTests.length > 0) {
       const industryLimit = industryTests[0].triggerLevel ?? industryTests[0].thresholdLevel;
@@ -178,7 +178,7 @@ export function validateExtraction(
     const obligorBuckets = concentrations.filter((c) => c.concentrationType === "SINGLE_OBLIGOR");
     const maxObligorPct = obligorBuckets.reduce((max, c) => Math.max(max, c.actualPct ?? 0), 0);
     const obligorTests = tests.filter((t) =>
-      t.testType === "CONCENTRATION" && (t.testName?.toLowerCase().includes("obligor") || t.testName?.toLowerCase().includes("single"))
+      t.testType?.toUpperCase() === "CONCENTRATION" && (t.testName?.toLowerCase().includes("obligor") || t.testName?.toLowerCase().includes("single"))
     );
     if (maxObligorPct > 0 && obligorTests.length > 0) {
       const obligorLimit = obligorTests[0].triggerLevel ?? obligorTests[0].thresholdLevel;

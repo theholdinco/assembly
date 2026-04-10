@@ -244,12 +244,24 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     // Save per-loan beginning par for interest calc
     const loanBeginningPar = hasLoans ? loanStates.map((l) => l.survivingPar) : [];
 
-    // ── 2. Per-loan defaults ────────────────────────────────────────
+    // ── 2. Per-loan maturities (before defaults — maturing loans pay at par) ──
+    let totalMaturities = 0;
+    if (hasLoans) {
+      for (const loan of loanStates) {
+        if (q === loan.maturityQuarter) {
+          totalMaturities += loan.survivingPar;
+          loan.survivingPar = 0;
+        }
+      }
+    }
+
+    // ── 3. Per-loan defaults (only on non-maturing surviving loans) ──
     let totalDefaults = 0;
     const defaultsByRating: Record<string, number> = {};
 
     if (hasLoans) {
       for (const loan of loanStates) {
+        if (loan.survivingPar <= 0) continue;
         const hazard = quarterlyHazard[loan.ratingBucket] ?? 0;
         const loanDefaults = draw(loan.survivingPar, hazard);
         loan.survivingPar -= loanDefaults;
@@ -262,17 +274,6 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
 
     if (totalDefaults > 0 && recoveryPct > 0) {
       recoveryPipeline.push({ quarter: q + recoveryLagQ, amount: totalDefaults * (recoveryPct / 100) });
-    }
-
-    // ── 3. Per-loan maturities ──────────────────────────────────────
-    let totalMaturities = 0;
-    if (hasLoans) {
-      for (const loan of loanStates) {
-        if (q === loan.maturityQuarter) {
-          totalMaturities += loan.survivingPar;
-          loan.survivingPar = 0;
-        }
-      }
     }
 
     // ── 4. Per-loan prepayments ─────────────────────────────────────
@@ -468,7 +469,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
       const interestDueAtAndAbove = ocEligibleTranches
         .filter((t) => t.seniorityRank <= ic.rank)
         .reduce((s, t) => s + bopTrancheBalances[t.className] * trancheCouponRate(t, baseRatePct) / 4, 0);
-      const actual = interestDueAtAndAbove > 0 ? (interestAfterFees / interestDueAtAndAbove) * 100 : 999;
+      const actual = interestDueAtAndAbove > 0 ? (interestCollected / interestDueAtAndAbove) * 100 : 999;
       const passing = actual >= ic.triggerLevel;
       icResults.push({ className: ic.className, actual, trigger: ic.triggerLevel, passing });
     }
@@ -593,40 +594,54 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
       const nextTranche = debtTranches[di + 1];
       const atRankBoundary = !nextTranche || nextTranche.seniorityRank > t.seniorityRank;
       if (atRankBoundary && (failingOcRanks.has(t.seniorityRank) || failingIcRanks.has(t.seniorityRank))) {
-        // Divert remaining interest to pay down senior tranches
         let diversion = availableInterest;
         availableInterest = 0;
         diverted = true;
-        for (const dt of sortedTranches) {
-          if (dt.isIncomeNote || diversion <= 0) continue;
-          // Pay deferred interest first, then principal
-          const ddp = Math.min(deferredBalances[dt.className], diversion);
-          deferredBalances[dt.className] -= ddp;
-          diversion -= ddp;
-          const dp = Math.min(trancheBalances[dt.className], diversion);
-          trancheBalances[dt.className] -= dp;
-          principalPaid[dt.className] += ddp + dp;
-          diversion -= dp;
+        if (inRP) {
+          // During RP: diverted interest purchases additional collateral to cure the OC breach
+          currentPar += diversion;
+          if (hasLoans && diversion > 0) {
+            loanStates.push({
+              survivingPar: diversion,
+              ratingBucket: reinvestmentRating,
+              spreadBps: reinvestmentSpreadBps,
+              maturityQuarter: Math.min(q + reinvestmentTenorQuarters, totalQuarters),
+            });
+          }
+        } else {
+          // Outside RP: divert to pay down senior tranches
+          for (const dt of sortedTranches) {
+            if (dt.isIncomeNote || diversion <= 0) continue;
+            const ddp = Math.min(deferredBalances[dt.className], diversion);
+            deferredBalances[dt.className] -= ddp;
+            diversion -= ddp;
+            const dp = Math.min(trancheBalances[dt.className], diversion);
+            trancheBalances[dt.className] -= dp;
+            principalPaid[dt.className] += ddp + dp;
+            diversion -= dp;
+          }
         }
       }
     }
 
-    // PPM Step V: Reinvestment OC Test — 50% diversion during RP only
+    // PPM Step V: Reinvestment OC Test — 50% diversion during RP to buy collateral
     if (reinvOcFailing && availableInterest > 0) {
-      let diversion = availableInterest * 0.5;
+      const diversion = availableInterest * 0.5;
       availableInterest -= diversion;
-      // Apply diverted funds to pay down senior tranches
-      for (const dt of sortedTranches) {
-        if (dt.isIncomeNote || diversion <= 0) continue;
-        const ddp = Math.min(deferredBalances[dt.className], diversion);
-        deferredBalances[dt.className] -= ddp;
-        diversion -= ddp;
-        const dp = Math.min(trancheBalances[dt.className], diversion);
-        trancheBalances[dt.className] -= dp;
-        principalPaid[dt.className] += ddp + dp;
-        diversion -= dp;
+      currentPar += diversion;
+      if (hasLoans && diversion > 0) {
+        loanStates.push({
+          survivingPar: diversion,
+          ratingBucket: reinvestmentRating,
+          spreadBps: reinvestmentSpreadBps,
+          maturityQuarter: Math.min(q + reinvestmentTenorQuarters, totalQuarters),
+        });
       }
     }
+
+    // Refresh endingPar after any RP OC diversion may have purchased collateral
+    if (hasLoans) endingPar = loanStates.reduce((s, l) => s + l.survivingPar, 0);
+    else endingPar = currentPar;
 
     // PPM Step W: Subordinated management fee — paid after all debt tranches
     const subFeeAmount = beginningPar * (subFeePct / 100) / 4;
@@ -637,11 +652,9 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     // distribution. If it exceeds the hurdle, the CM takes incentiveFeePct% of the
     // full distribution (catch-up style, per standard European CLO indentures).
     let incentiveFeeFromInterest = 0;
-    if (incentiveFeePct > 0 && availableInterest > 0) {
-      const preFeeIrr = incentiveFeeHurdleIrr > 0
-        ? calculateIrr([...equityCashFlows, availableInterest], 4)
-        : null;
-      const aboveHurdle = incentiveFeeHurdleIrr <= 0 || (preFeeIrr !== null && preFeeIrr > incentiveFeeHurdleIrr);
+    if (incentiveFeePct > 0 && incentiveFeeHurdleIrr > 0 && availableInterest > 0) {
+      const preFeeIrr = calculateIrr([...equityCashFlows, availableInterest], 4);
+      const aboveHurdle = preFeeIrr !== null && preFeeIrr > incentiveFeeHurdleIrr;
       if (aboveHurdle) {
         incentiveFeeFromInterest = availableInterest * (incentiveFeePct / 100);
         availableInterest -= incentiveFeeFromInterest;
@@ -670,15 +683,13 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
 
     // PPM Step U: Incentive fee from principal proceeds (same IRR-gated logic)
     let incentiveFeeFromPrincipal = 0;
-    if (incentiveFeePct > 0 && availablePrincipal > 0) {
+    if (incentiveFeePct > 0 && incentiveFeeHurdleIrr > 0 && availablePrincipal > 0) {
       // Check IRR including both interest and principal equity for this period.
       // Use pre-fee interest (add back any incentive fee already taken from interest)
       // so the principal gate sees the same terminal value as the interest gate.
       const preFeeInterestForEquity = equityFromInterest + incentiveFeeFromInterest;
-      const preFeeIrr = incentiveFeeHurdleIrr > 0
-        ? calculateIrr([...equityCashFlows, preFeeInterestForEquity + availablePrincipal], 4)
-        : null;
-      const aboveHurdle = incentiveFeeHurdleIrr <= 0 || (preFeeIrr !== null && preFeeIrr > incentiveFeeHurdleIrr);
+      const preFeeIrr = calculateIrr([...equityCashFlows, preFeeInterestForEquity + availablePrincipal], 4);
+      const aboveHurdle = preFeeIrr !== null && preFeeIrr > incentiveFeeHurdleIrr;
       if (aboveHurdle) {
         incentiveFeeFromPrincipal = availablePrincipal * (incentiveFeePct / 100);
         availablePrincipal -= incentiveFeeFromPrincipal;

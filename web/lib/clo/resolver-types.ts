@@ -68,6 +68,7 @@ export interface ResolvedLoan {
   maturityDate: string;
   ratingBucket: string;
   spreadBps: number;
+  obligorName?: string;
 }
 
 export type WarningSeverity = "info" | "warn" | "error";

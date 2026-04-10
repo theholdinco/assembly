@@ -83,10 +83,13 @@ export function textForPages(allPages: PageTableData[], startPage: number, endPa
 
 export function parseNumber(cell: string | null | undefined): number | null {
   if (!cell) return null;
-  const cleaned = cell.replace(/[,%\s]/g, "").replace(/[()]/g, "");
+  const trimmed = cell.trim();
+  const isNegative = trimmed.startsWith("(") && trimmed.endsWith(")");
+  const cleaned = trimmed.replace(/[,%\s()]/g, "");
   if (cleaned === "" || cleaned === "N/A" || cleaned === "-" || cleaned === "n/a") return null;
   const num = Number(cleaned);
-  return isNaN(num) ? null : num;
+  if (isNaN(num)) return null;
+  return isNegative ? -num : num;
 }
 
 export function parsePercent(cell: string | null | undefined): number | null {
@@ -443,14 +446,14 @@ export function parseHoldingsTables(
     if (detectedType) currentAssetType = detectedType;
 
     for (const table of p.tables) {
-      // Try to detect column mapping from header row (first row or any row matching header patterns)
-      if (!colMap) {
-        for (const row of table.rows) {
-          const detected = detectHoldingsColumnMap(row);
-          if (detected && Object.keys(detected).length >= 2) {
-            colMap = detected;
-            break;
-          }
+      // Detect column mapping from header row — reset per table since
+      // different asset sections (Term Loans, Bonds, Equity) may have different layouts
+      colMap = null;
+      for (const row of table.rows) {
+        const detected = detectHoldingsColumnMap(row);
+        if (detected && Object.keys(detected).length >= 2) {
+          colMap = detected;
+          break;
         }
       }
 

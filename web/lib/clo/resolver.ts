@@ -226,11 +226,9 @@ function resolveTriggers(
     // Values < 2 are almost certainly ratios (e.g. 1.05 → 105%). Values 2–10
     // are ambiguous but rare for OC triggers — warn but still convert.
     // Values >= 10 are treated as percentages (e.g. 105.0% stays 105.0%).
-    if (triggerLevel > 0 && triggerLevel < 2) {
+    if (triggerLevel > 0 && triggerLevel < 10) {
       triggerLevel = triggerLevel * 100;
       warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${t.triggerLevel} looks like a ratio, converting to ${triggerLevel}%`, severity: "warn" });
-    } else if (triggerLevel >= 2 && triggerLevel < 10) {
-      warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${triggerLevel}% for ${t.className} is unusually low — verify this is not a ratio (expected range: 100-150%)`, severity: "error" });
     }
     if (triggerLevel > 200) {
       warnings.push({ field: `ocTrigger.${t.className}`, message: `OC trigger ${triggerLevel}% for ${t.className} seems unusually high`, severity: "warn" });
@@ -240,13 +238,11 @@ function resolveTriggers(
 
   const ic: ResolvedTrigger[] = dedupTriggers(icRaw, warnings).map(t => {
     let triggerLevel = t.triggerLevel;
-    // IC triggers: values < 2 are ratios (e.g. 1.20 → 120%). IC triggers are
-    // typically 100-200%, so the 2 boundary safely separates ratios from percentages.
-    if (triggerLevel > 0 && triggerLevel < 2) {
+    // IC triggers: values < 10 are ratios (e.g. 1.20 → 120%). IC triggers are
+    // typically 100-200%. Values >= 10 are treated as percentages.
+    if (triggerLevel > 0 && triggerLevel < 10) {
       triggerLevel = triggerLevel * 100;
       warnings.push({ field: `icTrigger.${t.className}`, message: `IC trigger ${t.triggerLevel} looks like a ratio, converting to ${triggerLevel}%`, severity: "warn" });
-    } else if (triggerLevel >= 2 && triggerLevel < 10) {
-      warnings.push({ field: `icTrigger.${t.className}`, message: `IC trigger ${triggerLevel}% for ${t.className} is unusually low — verify this is not a ratio (expected range: 100-200%)`, severity: "error" });
     }
     if (triggerLevel > 500) {
       warnings.push({ field: `icTrigger.${t.className}`, message: `IC trigger ${triggerLevel}% for ${t.className} seems unusually high`, severity: "warn" });
@@ -434,6 +430,7 @@ export function resolveWaterfallInputs(
       maturityDate: h.maturityDate ?? fallbackMaturity,
       ratingBucket: mapToRatingBucket(h.moodysRating ?? null, h.spRating ?? null, h.fitchRating ?? null, h.compositeRating ?? null),
       spreadBps: h.spreadBps ?? wacSpreadBps,
+      obligorName: h.obligorName ?? undefined,
     }));
 
   return {

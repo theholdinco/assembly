@@ -150,7 +150,7 @@ async function batchInsert(table: string, rows: Record<string, unknown>[]): Prom
 
   // Filter to only columns that exist in the target table
   const validColumns = await getTableColumns(table);
-  const allColumns = Object.keys(rows[0]);
+  const allColumns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
   const columns = allColumns.filter((c) => validColumns.has(c));
   const dropped = allColumns.filter((c) => !validColumns.has(c));
   if (dropped.length > 0) {
@@ -374,8 +374,8 @@ export async function runExtraction(
   // Insert Pass 1 data
   const p1Normalized = normalizePass1(pass1Data, reportPeriodId);
   await replaceIfPresent("clo_pool_summary", [p1Normalized.poolSummary]);
-  normalizeComplianceTestRows(p1Normalized.complianceTests);
-  await replaceIfPresent("clo_compliance_tests", p1Normalized.complianceTests);
+  const normalizedTests = normalizeComplianceTestRows(p1Normalized.complianceTests);
+  await replaceIfPresent("clo_compliance_tests", normalizedTests);
   await replaceIfPresent("clo_account_balances", p1Normalized.accountBalances);
   await replaceIfPresent("clo_par_value_adjustments", p1Normalized.parValueAdjustments);
 
@@ -945,8 +945,8 @@ export async function runSectionExtraction(
   }
 
   // Insert compliance tests
-  normalizeComplianceTestRows(normalized.complianceTests);
-  await replaceIfPresent("clo_compliance_tests", normalized.complianceTests);
+  const normalizedTests = normalizeComplianceTestRows(normalized.complianceTests);
+  await replaceIfPresent("clo_compliance_tests", normalizedTests);
   if (normalized.complianceTests.length > 0) console.log(`[extraction] → clo_compliance_tests: ${normalized.complianceTests.length} rows`);
 
   // Insert account balances

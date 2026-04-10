@@ -1,6 +1,6 @@
 // web/lib/clo/monte-carlo.ts
 
-import { runProjection, type ProjectionInputs, type DefaultDrawFn } from "./projection";
+import { runProjection, quartersBetween, type ProjectionInputs, type DefaultDrawFn } from "./projection";
 
 export interface MonteCarloPercentiles {
   p5: number;
@@ -42,7 +42,7 @@ export function runMonteCarlo(
   // default paths don't silently lose OC data for later quarters.
   const calibration = runProjection(inputs);
   const totalQuarters = Math.max(calibration.periods.length, inputs.maturityDate
-    ? Math.ceil((new Date(inputs.maturityDate).getTime() - new Date(inputs.currentDate).getTime()) / (1000 * 60 * 60 * 24 * 91.25))
+    ? Math.max(1, quartersBetween(inputs.currentDate, inputs.maturityDate))
     : calibration.periods.length);
   // Track OC failures per quarter per class
   const ocClasses = calibration.periods[0]?.ocTests.map(t => t.className) ?? [];
