@@ -632,11 +632,11 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
             .filter((tr) => tr.seniorityRank <= failingOc.rank)
             .reduce((s, tr) => s + trancheBalances[tr.className] + deferredBalances[tr.className], 0);
           const trigger = failingOc.triggerLevel / 100; // convert from percentage to ratio
-          if (inRP) {
-            // Diversion buys collateral → increases numerator
+          if (inRP && !failingIc) {
+            // OC-only during RP: diversion buys collateral → increases numerator
             cureAmount = Math.max(0, trigger * debtAtAndAbove - ocNumerator);
           } else {
-            // Diversion pays down tranches → decreases denominator
+            // Outside RP, or IC also failing (forces paydown): decreases denominator
             cureAmount = Math.max(0, debtAtAndAbove - ocNumerator / trigger);
           }
         }
