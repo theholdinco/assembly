@@ -655,6 +655,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
         if (inRP && diversion > 0) {
           // During RP: diverted interest purchases additional collateral to cure the OC breach
           currentPar += diversion;
+          ocNumerator += diversion; // update so subsequent OC cures at lower ranks see the purchased collateral
           if (hasLoans) {
             loanStates.push({
               survivingPar: diversion,
@@ -680,6 +681,14 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     }
 
     // PPM Step V: Reinvestment OC Test — divert a percentage of remaining interest during RP to buy collateral
+    // Re-check after standard OC cures may have bought collateral (updating ocNumerator)
+    if (inRP && reinvestmentOcTrigger && availableInterest > 0) {
+      const reinvOcDebt = ocEligibleTranches
+        .filter((tr) => tr.seniorityRank <= reinvestmentOcTrigger.rank)
+        .reduce((s, tr) => s + trancheBalances[tr.className] + deferredBalances[tr.className], 0);
+      const reinvOcActual = reinvOcDebt > 0 ? (ocNumerator / reinvOcDebt) * 100 : 999;
+      reinvOcFailing = reinvOcActual < reinvestmentOcTrigger.triggerLevel;
+    }
     if (reinvOcFailing && availableInterest > 0) {
       const diversion = availableInterest * (reinvestmentOcTrigger!.diversionPct / 100);
       availableInterest -= diversion;
