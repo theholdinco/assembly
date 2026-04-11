@@ -625,7 +625,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
           (ic) => ic.rank === t.seniorityRank && icResults.some((r) => r.className === ic.className && !r.passing)
         );
 
-        let cureAmount = availableInterest; // default: divert everything (IC failures or uncurable)
+        let cureAmount = 0;
 
         if (failingOc) {
           const debtAtAndAbove = ocEligibleTranches
@@ -641,8 +641,11 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
           }
         }
 
-        // IC cure: harder to compute precisely (depends on interest earned on diverted principal).
-        // For IC failures, divert everything as a conservative approach.
+        // IC cure: harder to compute precisely (interest earned on diverted capital is circular).
+        // If IC also fails, divert everything as conservative approach.
+        if (failingIc) {
+          cureAmount = availableInterest;
+        }
 
         const preDiversionInterest = availableInterest;
         let diversion = Math.min(cureAmount, availableInterest);
