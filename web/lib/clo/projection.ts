@@ -641,10 +641,34 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
           }
         }
 
-        // IC cure: harder to compute precisely (interest earned on diverted capital is circular).
-        // If IC also fails, divert everything as conservative approach.
+        // IC cure: pay down notes to reduce interest due until IC is satisfied.
+        // IC = interestAfterFees / interestDue >= trigger
+        // Paying down tranche X reduces interestDue by (paydown * couponRate / 4).
+        // Compute iteratively since paydown is sequential (most senior first).
         if (failingIc) {
-          cureAmount = availableInterest;
+          const icTriggerRatio = failingIc.triggerLevel / 100;
+          const interestDueAtAndAbove = ocEligibleTranches
+            .filter((tr) => tr.seniorityRank <= failingIc.rank)
+            .reduce((s, tr) => s + bopTrancheBalances[tr.className] * trancheCouponRate(tr, baseRatePct, baseRateFloorPct) / 4, 0);
+          const neededInterestDue = interestAfterFees / icTriggerRatio;
+          const reductionNeeded = Math.max(0, interestDueAtAndAbove - neededInterestDue);
+
+          if (reductionNeeded > 0) {
+            // Compute how much principal paydown achieves the needed interest_due reduction.
+            // Pay down most senior tranche first — each € reduces interestDue by couponRate/4.
+            let reductionRemaining = reductionNeeded;
+            let icCureAmount = 0;
+            for (const tr of ocEligibleTranches.filter((tr) => tr.seniorityRank <= failingIc.rank)) {
+              if (reductionRemaining <= 0) break;
+              const couponPerPar = trancheCouponRate(tr, baseRatePct, baseRateFloorPct) / 4;
+              if (couponPerPar <= 0) continue;
+              const trancheAvailable = trancheBalances[tr.className] + deferredBalances[tr.className];
+              const paydownForThisTranche = Math.min(reductionRemaining / couponPerPar, trancheAvailable);
+              icCureAmount += paydownForThisTranche;
+              reductionRemaining -= paydownForThisTranche * couponPerPar;
+            }
+            cureAmount = Math.max(cureAmount, icCureAmount);
+          }
         }
 
         let diversion = Math.min(cureAmount, availableInterest);
