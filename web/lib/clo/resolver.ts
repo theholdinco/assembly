@@ -4,6 +4,12 @@ import { parseSpreadToBps, normalizeWacSpread } from "./ingestion-gate";
 import { mapToRatingBucket } from "./rating-mapping";
 import { CLO_DEFAULTS } from "./defaults";
 
+function addQuartersForResolver(dateIso: string, quarters: number): string {
+  const d = new Date(dateIso);
+  d.setUTCMonth(d.getUTCMonth() + quarters * 3);
+  return d.toISOString().slice(0, 10);
+}
+
 function normClass(s: string): string {
   const base = s.replace(/^class\s+/i, "").replace(/[-\s]+notes?$/i, "").trim().toLowerCase();
   // Normalize subordinated variants: "subordinated", "sub", "subordinated notes" all → "sub"
@@ -84,6 +90,11 @@ function resolveTranches(
   const classXAmort = constraints.dealSizing?.classXAmortisation;
   const classXAmortPerPeriod = classXAmort ? parseAmount(classXAmort) : null;
 
+  // Compute Class X amort start date: "second Payment Date following Issue Date"
+  // = one quarter after firstPaymentDate
+  const firstPayment = constraints.keyDates?.firstPaymentDate;
+  const classXAmortStartDate = firstPayment ? addQuartersForResolver(firstPayment, 1) : null;
+
   // Build PPM spread lookup
   const ppmSpreadByClass = new Map<string, number>();
   const ppmBalanceByClass = new Map<string, number>();
@@ -137,6 +148,7 @@ function resolveTranches(
           isDeferrable: t.isDeferrable ?? ppmDeferrableByClass.get(key) ?? false,
           isAmortising: isClassX,
           amortisationPerPeriod: isClassX ? (classXAmortPerPeriod ?? null) : null,
+          amortStartDate: isClassX ? classXAmortStartDate : null,
           source: snap ? "snapshot" as const : "db_tranche" as const,
         };
       });
@@ -193,6 +205,7 @@ function resolveTranches(
       isDeferrable: e.deferrable ?? false,
       isAmortising: isClassX,
       amortisationPerPeriod: isClassX ? (classXAmortPerPeriod ?? null) : null,
+      amortStartDate: isClassX ? classXAmortStartDate : null,
       source: "ppm" as const,
     };
   });

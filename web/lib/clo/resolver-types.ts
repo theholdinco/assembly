@@ -27,6 +27,7 @@ export interface ResolvedTranche {
   isDeferrable: boolean;
   isAmortising: boolean;
   amortisationPerPeriod: number | null;
+  amortStartDate: string | null; // when amort begins (null = active immediately)
   source: ResolvedSource;
 }
 

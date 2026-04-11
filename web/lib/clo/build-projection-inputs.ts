@@ -91,6 +91,7 @@ export function buildFromResolved(
       isDeferrable: t.isDeferrable,
       isAmortising: t.isAmortising,
       amortisationPerPeriod: t.amortisationPerPeriod,
+      amortStartDate: t.amortStartDate,
     })),
     ocTriggers: resolved.ocTriggers.map(t => ({
       className: t.className,

@@ -33,6 +33,7 @@ export interface ProjectionInputs {
     isDeferrable: boolean;
     isAmortising?: boolean; // Class X: principal paid from interest waterfall on fixed schedule
     amortisationPerPeriod?: number | null; // fixed amount per quarter (null = pay full remaining balance)
+    amortStartDate?: string | null; // date when amort begins (e.g. second payment date). If null or past, amort active immediately.
   }[];
   ocTriggers: { className: string; triggerLevel: number; rank: number }[];
   icTriggers: { className: string; triggerLevel: number; rank: number }[];
@@ -335,11 +336,12 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     }
 
     // ── 7. Reinvestment ─────────────────────────────────────────
+    // No reinvestment on the final period (call or maturity) — the deal is winding down.
     let reinvestment = 0;
     const principalProceeds = prepayments + scheduledMaturities + recoveries;
-    if (inRP) {
+    if (!isMaturity && inRP) {
       reinvestment = principalProceeds;
-    } else if (postRpReinvestmentPct > 0 && principalProceeds > 0) {
+    } else if (!isMaturity && postRpReinvestmentPct > 0 && principalProceeds > 0) {
       // Post-RP limited reinvestment (credit improved/risk sales, unscheduled principal)
       reinvestment = principalProceeds * (postRpReinvestmentPct / 100);
     }
@@ -409,10 +411,11 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
 
     // First pass: pay down from principal proceeds only
     // Deferred interest on a tranche is paid before its principal.
-    // Amortising tranches (Class X) are SKIPPED here — they pay down from interest proceeds.
+    // Amortising tranches (Class X) are SKIPPED during normal periods — they pay down
+    // from interest proceeds. At maturity/call, all tranches are paid sequentially.
     let remainingPrelim = prelimPrincipal;
     for (const t of sortedTranches) {
-      if (t.isIncomeNote || t.isAmortising) continue;
+      if (t.isIncomeNote || (t.isAmortising && !isMaturity)) continue;
       // Pay off deferred interest first, then principal
       const deferredPay = Math.min(deferredBalances[t.className], remainingPrelim);
       deferredBalances[t.className] -= deferredPay;
@@ -518,7 +521,8 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     const amortDemand: Record<string, number> = {};
     for (const t of debtTranches) {
       if (!t.isAmortising || trancheBalances[t.className] <= 0.01) continue;
-      if (q < 2) continue; // Class X amort starts on second payment date
+      // Amort only active after the start date (e.g. second payment date per PPM)
+      if (t.amortStartDate && new Date(periodDate) < new Date(t.amortStartDate)) continue;
       const scheduleAmt = resolvedAmortPerPeriod[t.className] ?? trancheBalances[t.className];
       amortDemand[t.className] = Math.min(scheduleAmt, trancheBalances[t.className]);
     }
