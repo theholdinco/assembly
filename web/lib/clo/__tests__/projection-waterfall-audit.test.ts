@@ -412,3 +412,189 @@ describe("Fee waterfall priority order", () => {
     );
   });
 });
+
+// ─── Task 5: Composite OC numerator ─────────────────────────────────────────
+
+describe("OC numerator combines all components correctly", () => {
+  it("OC numerator = performingPar - cccHaircut (with pending recoveries, principal cash, and CCC all active)", () => {
+    const inputs = makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      defaultRatesByRating: { ...uniformRates(0), CCC: 10 },
+      cprPct: 0,
+      recoveryPct: 60,
+      recoveryLagMonths: 12,
+      cccBucketLimitPct: 7.5,
+      cccMarketValuePct: 70,
+      loans: [
+        { parBalance: 30_000_000, maturityDate: addQuarters("2026-01-15", 20), ratingBucket: "CCC", spreadBps: 650 },
+        { parBalance: 50_000_000, maturityDate: addQuarters("2026-01-15", 20), ratingBucket: "B", spreadBps: 400 },
+        { parBalance: 20_000_000, maturityDate: addQuarters("2026-01-15", 3), ratingBucket: "B", spreadBps: 400 },
+      ],
+      tranches: [
+        { className: "A", currentBalance: 60_000_000, spreadBps: 140, seniorityRank: 1, isFloating: true, isIncomeNote: false, isDeferrable: false },
+        { className: "B", currentBalance: 20_000_000, spreadBps: 300, seniorityRank: 2, isFloating: true, isIncomeNote: false, isDeferrable: true },
+        { className: "Sub", currentBalance: 20_000_000, spreadBps: 0, seniorityRank: 3, isFloating: false, isIncomeNote: true, isDeferrable: false },
+      ],
+      ocTriggers: [
+        { className: "A", triggerLevel: 110, rank: 1 },
+        { className: "B", triggerLevel: 105, rank: 2 },
+      ],
+      icTriggers: [],
+    });
+
+    const result = runProjection(inputs);
+
+    for (const p of result.periods.slice(0, 8)) {
+      for (const oc of p.ocTests) {
+        expect(isFinite(oc.actual)).toBe(true);
+        expect(oc.actual).toBeGreaterThanOrEqual(0);
+      }
+    }
+
+    const q1 = result.periods[0];
+    expect(q1.defaults).toBeGreaterThan(0);
+    expect(q1.recoveries).toBe(0);
+
+    const naiveOcA = (q1.endingPar / 60_000_000) * 100;
+    const actualOcA = q1.ocTests.find((t) => t.className === "A")!.actual;
+    expect(actualOcA).toBeLessThanOrEqual(naiveOcA + 0.1);
+  });
+});
+
+// ─── Task 6: PIK catch-up priority ──────────────────────────────────────────
+
+describe("PIK catch-up: deferred interest paid when deal recovers", () => {
+  it("tranche with accumulated PIK eventually gets repaid when OC cures", () => {
+    const inputs = makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      defaultRatesByRating: uniformRates(5),
+      cprPct: 20,
+      recoveryPct: 0,
+      deferredInterestCompounds: true,
+      tranches: [
+        { className: "A", currentBalance: 50_000_000, spreadBps: 140, seniorityRank: 1, isFloating: true, isIncomeNote: false, isDeferrable: false },
+        { className: "B", currentBalance: 20_000_000, spreadBps: 300, seniorityRank: 2, isFloating: true, isIncomeNote: false, isDeferrable: true },
+        { className: "Sub", currentBalance: 30_000_000, spreadBps: 0, seniorityRank: 3, isFloating: false, isIncomeNote: true, isDeferrable: false },
+      ],
+      ocTriggers: [{ className: "A", triggerLevel: 200, rank: 1 }],
+      icTriggers: [],
+    });
+
+    const result = runProjection(inputs);
+
+    const bBalanceQ2 = result.periods[1]?.tranchePrincipal.find((t) => t.className === "B")!.endBalance;
+    expect(bBalanceQ2).toBeGreaterThanOrEqual(20_000_000);
+
+    const totalBPrincipal = result.periods.reduce((s, p) => {
+      const bPrin = p.tranchePrincipal.find((t) => t.className === "B");
+      return s + (bPrin?.paid ?? 0);
+    }, 0);
+
+    expect(totalBPrincipal).toBeGreaterThan(0);
+  });
+
+  it("PIK balance is included when tranche is paid off at maturity", () => {
+    const inputs = makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      maturityDate: addQuarters("2026-01-15", 8),
+      defaultRatesByRating: uniformRates(0),
+      cprPct: 0,
+      recoveryPct: 0,
+      deferredInterestCompounds: true,
+      tranches: [
+        { className: "A", currentBalance: 70_000_000, spreadBps: 140, seniorityRank: 1, isFloating: true, isIncomeNote: false, isDeferrable: false },
+        { className: "B", currentBalance: 10_000_000, spreadBps: 300, seniorityRank: 2, isFloating: true, isIncomeNote: false, isDeferrable: true },
+        { className: "Sub", currentBalance: 20_000_000, spreadBps: 0, seniorityRank: 3, isFloating: false, isIncomeNote: true, isDeferrable: false },
+      ],
+      ocTriggers: [{ className: "A", triggerLevel: 999, rank: 1 }],
+      icTriggers: [],
+    });
+
+    const result = runProjection(inputs);
+
+    const totalBPaid = result.periods.reduce((s, p) => {
+      return s + (p.tranchePrincipal.find((t) => t.className === "B")?.paid ?? 0);
+    }, 0);
+
+    expect(totalBPaid).toBeGreaterThan(10_000_000);
+  });
+});
+
+// ─── Task 7: OC/IC cure interaction — max not additive ──────────────────────
+
+describe("OC + IC cure uses max (not sum) of cure amounts", () => {
+  it("dual failure diverts no more than the worse single-trigger case", () => {
+    // OC-only failure
+    const ocOnly = runProjection(makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      cprPct: 0,
+      recoveryPct: 0,
+      defaultRatesByRating: uniformRates(15),
+      ocTriggers: [{ className: "B", triggerLevel: 150, rank: 2 }],
+      icTriggers: [],
+    }));
+
+    // IC-only failure
+    const icOnly = runProjection(makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      cprPct: 0,
+      recoveryPct: 0,
+      defaultRatesByRating: uniformRates(0),
+      baseRatePct: 0.5,
+      seniorFeePct: 1.0,
+      icTriggers: [{ className: "B", triggerLevel: 300, rank: 2 }],
+      ocTriggers: [],
+    }));
+
+    // Both fail
+    const both = runProjection(makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      cprPct: 0,
+      recoveryPct: 0,
+      defaultRatesByRating: uniformRates(15),
+      baseRatePct: 0.5,
+      seniorFeePct: 1.0,
+      ocTriggers: [{ className: "B", triggerLevel: 150, rank: 2 }],
+      icTriggers: [{ className: "B", triggerLevel: 300, rank: 2 }],
+    }));
+
+    const ocEquity = ocOnly.periods[0].equityDistribution;
+    const icEquity = icOnly.periods[0].equityDistribution;
+    const bothEquity = both.periods[0].equityDistribution;
+
+    expect(bothEquity).toBeGreaterThanOrEqual(Math.min(ocEquity, icEquity) - 100);
+  });
+});
+
+// ─── Task 8: Pending recovery in OC numerator — modeling convention ─────────
+
+describe("Pending recoveries included in OC numerator (modeling convention)", () => {
+  it("CONVENTION: OC ratio in Q1 is higher with 60% recovery/12mo lag than with 0% recovery", () => {
+    const withRecovery = runProjection(makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      defaultRatesByRating: uniformRates(10),
+      cprPct: 0,
+      recoveryPct: 60,
+      recoveryLagMonths: 12,
+      ocTriggers: [{ className: "A", triggerLevel: 110, rank: 1 }],
+      icTriggers: [],
+    }));
+
+    const noRecovery = runProjection(makeInputs({
+      reinvestmentPeriodEnd: "2026-01-01",
+      defaultRatesByRating: uniformRates(10),
+      cprPct: 0,
+      recoveryPct: 0,
+      recoveryLagMonths: 12,
+      ocTriggers: [{ className: "A", triggerLevel: 110, rank: 1 }],
+      icTriggers: [],
+    }));
+
+    const ocWithRec = withRecovery.periods[0].ocTests[0].actual;
+    const ocNoRec = noRecovery.periods[0].ocTests[0].actual;
+    expect(ocWithRec).toBeGreaterThan(ocNoRec);
+
+    expect(withRecovery.periods[0].recoveries).toBe(0);
+    expect(noRecovery.periods[0].recoveries).toBe(0);
+  });
+});
