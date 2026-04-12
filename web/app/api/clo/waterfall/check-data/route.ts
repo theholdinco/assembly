@@ -46,6 +46,7 @@ CLO structural knowledge (DO NOT flag these as issues):
 - WAC spread may appear as a small number (e.g. 3.85) when stored in percentage form rather than basis points. The model auto-converts values < 20 to bps (× 100). Do NOT flag a WAC spread between 1–20 as "abnormally low" — it is likely in percentage form (e.g. 3.85% = 385 bps).
 - Test class name formatting varies between PPM and compliance reports (e.g. "Class E" vs "E", "Class A/B" vs "A/B"). The system normalizes these automatically. Do NOT flag minor naming differences as mismatches — only flag if a test class in the PPM has NO plausible match in the compliance data at all.
 - Some tranches may be fixed-rate in a predominantly floating-rate deal. This is normal (hedged or structured as fixed). Do NOT flag fixed-rate tranches as unusual unless ALL rated tranches are unexpectedly fixed.
+- Junior tranches (typically E and F) often have OC tests but NO IC tests. This is standard in European CLO structures. Do NOT flag missing IC tests on junior tranches as an issue. Only flag missing coverage tests if a SENIOR tranche (A, B, C) has no OC or IC test at all.
 
 Check for these specific issues that affect the waterfall projection model:
 1. Missing REQUIRED fields (severity=error): maturity date, tranche spreads on rated non-income notes, at least one OC or IC trigger level
@@ -158,9 +159,13 @@ function summarizeDealContext(ctx: Record<string, any>): string {
   if (snaps && snaps.length > 0) {
     parts.push(`\nTranche Snapshots (${snaps.length}):`);
     for (const s of snaps) {
-      const trancheName = trancheById.get(s.trancheId)?.className ?? s.trancheId ?? "?";
+      const tranche = trancheById.get(s.trancheId);
+      const trancheName = tranche?.className ?? s.trancheId ?? "?";
       tranchesWithSnapshots.add(normalizeClassName(trancheName));
-      parts.push(`  ${trancheName}: curBal=${s.currentBalance ?? "NULL"}, beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}`);
+      const bal = s.currentBalance ?? s.beginningBalance;
+      const origBal = tranche?.originalBalance;
+      const amortNote = origBal != null && bal != null && bal < origBal ? " (normal paydown from original)" : "";
+      parts.push(`  ${trancheName}: curBal=${s.currentBalance ?? "NULL"}, beginBal=${s.beginningBalance ?? "NULL"}, endBal=${s.endingBalance ?? "NULL"}, intPaid=${s.interestPaid ?? "NULL"}, princPaid=${s.principalPaid ?? "NULL"}${amortNote}`);
     }
   } else {
     parts.push("\nTranche Snapshots: NONE");
