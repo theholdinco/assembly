@@ -65,7 +65,7 @@ function makeInputs(overrides: Partial<ProjectionInputs> = {}): ProjectionInputs
 
 describe("OC cure RP convention: buy collateral (not paydown)", () => {
   it("MODELING CONVENTION: OC-only cure during RP increases par (buys collateral), does not pay down notes", () => {
-    const inputs = makeInputs({
+    const triggerInputs = makeInputs({
       reinvestmentPeriodEnd: addQuarters("2026-01-15", 20),
       defaultRatesByRating: uniformRates(8),
       cprPct: 0,
@@ -74,20 +74,32 @@ describe("OC cure RP convention: buy collateral (not paydown)", () => {
       icTriggers: [],
     });
 
-    const result = runProjection(inputs);
+    const noTriggerInputs = makeInputs({
+      reinvestmentPeriodEnd: addQuarters("2026-01-15", 20),
+      defaultRatesByRating: uniformRates(8),
+      cprPct: 0,
+      recoveryPct: 0,
+      ocTriggers: [],
+      icTriggers: [],
+    });
+
+    const result = runProjection(triggerInputs);
+    const baseline = runProjection(noTriggerInputs);
+
     const failPeriod = result.periods.find((p) =>
       p.ocTests.some((t) => t.className === "B" && !t.passing)
     );
-
     expect(failPeriod).toBeDefined();
+
     if (failPeriod) {
-      const parWithoutCure = failPeriod.beginningPar - failPeriod.defaults - failPeriod.prepayments + failPeriod.reinvestment;
-      expect(failPeriod.endingPar).toBeGreaterThanOrEqual(parWithoutCure - 1);
+      const baselinePeriod = baseline.periods.find((p) => p.periodNum === failPeriod.periodNum)!;
+      // Cure bought collateral → endingPar is HIGHER than no-trigger baseline
+      expect(failPeriod.endingPar).toBeGreaterThan(baselinePeriod.endingPar);
     }
   });
 
   it("MODELING CONVENTION: OC+IC cure during RP uses paydown (not buy collateral)", () => {
-    const inputs = makeInputs({
+    const bothInputs = makeInputs({
       reinvestmentPeriodEnd: addQuarters("2026-01-15", 20),
       defaultRatesByRating: uniformRates(8),
       cprPct: 0,
@@ -107,14 +119,22 @@ describe("OC cure RP convention: buy collateral (not paydown)", () => {
       icTriggers: [],
     });
 
-    const bothResult = runProjection(inputs);
+    const bothResult = runProjection(bothInputs);
     const ocOnlyResult = runProjection(ocOnlyInputs);
 
-    const bothP1 = bothResult.periods[0];
-    const ocP1 = ocOnlyResult.periods[0];
+    // Find a period where both OC and IC fail
+    const failPeriod = bothResult.periods.find((p) =>
+      p.ocTests.some((t) => !t.passing) && p.icTests.some((t) => !t.passing)
+    );
+    expect(failPeriod).toBeDefined();
 
-    expect(bothP1.endingPar).toBeLessThanOrEqual(ocP1.endingPar + 1);
-    expect(bothP1.endingLiabilities).toBeLessThanOrEqual(ocP1.endingLiabilities + 1);
+    if (failPeriod) {
+      const ocOnlyPeriod = ocOnlyResult.periods.find((p) => p.periodNum === failPeriod.periodNum)!;
+      // OC+IC: paydown path → endingPar should NOT be boosted like OC-only (buy collateral)
+      expect(failPeriod.endingPar).toBeLessThanOrEqual(ocOnlyPeriod.endingPar + 1);
+      // OC+IC: paydown reduces liabilities relative to beginning
+      expect(failPeriod.endingLiabilities).toBeLessThan(failPeriod.beginningLiabilities);
+    }
   });
 });
 
@@ -379,10 +399,14 @@ describe("Fee waterfall priority order", () => {
       icTriggers: [],
     }));
 
-    const aInterest = result.periods[0].trancheInterest.find((t) => t.className === "A")!;
-    const aInterestNoFee = noSubFee.periods[0].trancheInterest.find((t) => t.className === "A")!;
-    expect(aInterest.paid).toBeCloseTo(aInterestNoFee.paid, 0);
+    // All tranche interest should be identical with/without sub fee
+    for (const className of ["A", "B"]) {
+      const withSubFee = result.periods[0].trancheInterest.find((t) => t.className === className)!;
+      const withoutSubFee = noSubFee.periods[0].trancheInterest.find((t) => t.className === className)!;
+      expect(withSubFee.paid).toBeCloseTo(withoutSubFee.paid, 0);
+    }
 
+    // Sub fee reduces equity only
     expect(result.periods[0].equityDistribution).toBeLessThan(
       noSubFee.periods[0].equityDistribution
     );
