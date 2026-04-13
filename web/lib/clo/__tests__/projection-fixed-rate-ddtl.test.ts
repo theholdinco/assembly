@@ -242,7 +242,6 @@ describe("DDTL projection", () => {
         baseRateFloorPct: 0,
         defaultRatesByRating: uniformRates(0),
         cprPct: 0,
-        ddtlUnfundedPar: 500_000,
       })
     );
 

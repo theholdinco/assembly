@@ -157,7 +157,6 @@ export function buildFromResolved(
     unpricedDefaultedPar: resolved.unpricedDefaultedPar,
     preExistingDefaultOcValue: resolved.preExistingDefaultOcValue,
     impliedOcAdjustment: resolved.impliedOcAdjustment,
-    ddtlUnfundedPar: resolved.ddtlUnfundedPar,
     ddtlDrawPercent: userAssumptions.ddtlDrawPercent,
   };
 }

@@ -66,7 +66,6 @@ export interface ProjectionInputs {
   unpricedDefaultedPar?: number; // par of defaulted holdings without market price (model applies recoveryPct)
   preExistingDefaultOcValue?: number; // recovery value for OC numerator (agency rate — typically higher than market)
   impliedOcAdjustment?: number; // derived residual between trustee's Adjusted CPA and identified components
-  ddtlUnfundedPar?: number; // unfunded DDTL commitments to deduct from OC numerator
   ddtlDrawPercent?: number; // % of DDTL par actually funded on draw (default 100)
 }
 
@@ -155,7 +154,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     reinvestmentSpreadBps, reinvestmentTenorQuarters, reinvestmentRating: reinvestmentRatingOverride,
     cccBucketLimitPct, cccMarketValuePct, deferredInterestCompounds,
     initialPrincipalCash = 0, preExistingDefaultedPar = 0, preExistingDefaultRecovery = 0, unpricedDefaultedPar = 0, preExistingDefaultOcValue = 0, impliedOcAdjustment = 0,
-    ddtlUnfundedPar = 0, ddtlDrawPercent = 100,
+    ddtlDrawPercent = 100,
   } = inputs;
 
   const maturityQuarters = maturityDate ? Math.max(1, quartersBetween(currentDate, maturityDate)) : CLO_DEFAULTS.defaultMaxTenorYears * 4;
@@ -292,15 +291,7 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
     const isMaturity = q === totalQuarters;
 
     // ── 1. Beginning par ──────────────────────────────────────────
-    const beginningPar = hasLoans
-      ? loanStates.reduce((s, l) => s + l.survivingPar, 0)
-      : currentPar;
-    const beginningLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
-
-    // Save per-loan beginning par for interest calc (captured before draw so DDTLs show 0)
-    let loanBeginningPar = hasLoans ? loanStates.map((l) => l.survivingPar) : [];
-
-    // ── 1b. DDTL draw event ────────────────────────────────────────
+    // ── 1b. DDTL draw event (before beginningPar capture) ──────────
     if (hasLoans) {
       for (const loan of loanStates) {
         if (!loan.isDelayedDraw) continue;
@@ -311,9 +302,17 @@ export function runProjection(inputs: ProjectionInputs, defaultDrawFn?: DefaultD
           loan.isDelayedDraw = false;
         }
       }
-      // Recapture after draw so newly-funded DDTLs use their funded par for interest
-      loanBeginningPar = loanStates.map((l) => l.survivingPar);
     }
+
+    // Beginning par excludes unfunded DDTLs — they are not deployed collateral
+    // and should not be in the fee base (trustee, management, hedge fees).
+    const beginningPar = hasLoans
+      ? loanStates.filter(l => !l.isDelayedDraw).reduce((s, l) => s + l.survivingPar, 0)
+      : currentPar;
+    const beginningLiabilities = debtTranches.reduce((s, t) => s + trancheBalances[t.className] + deferredBalances[t.className], 0);
+
+    // Per-loan beginning par for interest calc (post-draw, so newly-funded DDTLs are included)
+    const loanBeginningPar = hasLoans ? loanStates.map((l) => l.survivingPar) : [];
 
     // ── 2. Per-loan maturities (before defaults — maturing loans pay at par) ──
     let totalMaturities = 0;
