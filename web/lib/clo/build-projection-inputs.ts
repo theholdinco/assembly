@@ -87,6 +87,19 @@ export function buildFromResolved(
   resolved: ResolvedDealData,
   userAssumptions: UserAssumptions,
 ): ProjectionInputs {
+  // Resolve DDTL draw quarter from user assumption
+  const ddtlDrawQuarter = userAssumptions.ddtlDrawAssumption === 'never_draw'
+    ? 0
+    : userAssumptions.ddtlDrawAssumption === 'custom_quarter'
+      ? userAssumptions.ddtlDrawQuarter
+      : CLO_DEFAULTS.ddtlDrawQuarter; // draw_at_deadline default
+
+  // Set drawQuarter on DDTL loans
+  const loans = resolved.loans.map(l => l.isDelayedDraw
+    ? { ...l, drawQuarter: ddtlDrawQuarter }
+    : l
+  );
+
   return {
     initialPar: resolved.poolSummary.totalPar,
     wacSpreadBps: resolved.poolSummary.wacSpreadBps,
@@ -127,7 +140,7 @@ export function buildFromResolved(
     maturityDate: resolved.dates.maturity,
     reinvestmentPeriodEnd: resolved.dates.reinvestmentPeriodEnd,
     currentDate: resolved.dates.currentDate,
-    loans: resolved.loans,
+    loans,
     defaultRatesByRating: userAssumptions.defaultRates,
     cprPct: userAssumptions.cprPct,
     recoveryPct: userAssumptions.recoveryPct,
@@ -144,5 +157,7 @@ export function buildFromResolved(
     unpricedDefaultedPar: resolved.unpricedDefaultedPar,
     preExistingDefaultOcValue: resolved.preExistingDefaultOcValue,
     impliedOcAdjustment: resolved.impliedOcAdjustment,
+    ddtlUnfundedPar: resolved.ddtlUnfundedPar,
+    ddtlDrawPercent: userAssumptions.ddtlDrawPercent,
   };
 }
