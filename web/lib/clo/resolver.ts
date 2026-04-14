@@ -709,8 +709,11 @@ export function resolveWaterfallInputs(
   if (totalPar > 0 && totalPrincipalBalance > 0) {
     const defaultedHaircut = preExistingDefaultedPar - preExistingDefaultOcValue;
     const implied = totalPrincipalBalance + principalAccountCash - defaultedHaircut - discountObligationHaircut - longDatedObligationHaircut - totalPar;
-    if (implied < 0) {
+    if (implied < -100) {
+      // Only warn if the residual is meaningfully negative (not just floating point noise)
       warnings.push({ field: "impliedOcAdjustment", message: `Adjusted CPA reconciliation has negative residual (${Math.round(implied).toLocaleString()}). Unmodeled trustee adjustments may be inflating the Adjusted CPA. OC adjustment set to 0.`, severity: "info" });
+    } else if (implied < 0) {
+      // Negligible negative residual (rounding) — reconciliation effectively closes. No warning.
     } else if (implied > totalPar * 0.05) {
       warnings.push({ field: "impliedOcAdjustment", message: `Derived OC adjustment (${Math.round(implied).toLocaleString()}) is >5% of par — likely includes adjustments beyond unfunded revolvers. Capping at 0.`, severity: "warn" });
     } else {
