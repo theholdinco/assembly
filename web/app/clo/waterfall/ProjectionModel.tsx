@@ -11,10 +11,12 @@ import type {
   CloHolding,
   ExtractedConstraints,
   BuyListItem,
+  EquityInceptionData,
 } from "@/lib/clo/types";
 import {
   runProjection,
   validateInputs,
+  calculateIrr,
   type ProjectionInputs,
   type ProjectionResult,
   type LoanInput,
@@ -51,6 +53,7 @@ interface Props {
   resolved?: ResolvedDealData;
   resolutionWarnings?: ResolutionWarning[];
   buyList?: BuyListItem[];
+  equityInceptionData?: EquityInceptionData | null;
 }
 
 export default function ProjectionModel({
@@ -67,6 +70,7 @@ export default function ProjectionModel({
   resolved,
   resolutionWarnings,
   buyList,
+  equityInceptionData,
 }: Props) {
   // Read URL params for pre-filling switch simulator from analysis page
   const searchParams = useSearchParams();
@@ -194,6 +198,20 @@ export default function ProjectionModel({
     }
     return undefined; // use engine default (book value)
   }, [equityEntryPriceCents, equityMetrics]);
+
+  const inceptionIrr = useMemo(() => {
+    const data = equityInceptionData;
+    if (!data?.purchaseDate || data.purchasePriceCents == null || !equityMetrics) return null;
+    const { payments } = data;
+    if (payments.length === 0) return null;
+    if (payments.some(p => p.distribution == null)) return null;
+
+    const purchasePrice = equityMetrics.subPar * data.purchasePriceCents / 100;
+    if (purchasePrice <= 0) return null;
+
+    const cashFlows = [-purchasePrice, ...payments.map(p => p.distribution!)];
+    return calculateIrr(cashFlows, 4);
+  }, [equityInceptionData, equityMetrics]);
 
   const inputs: ProjectionInputs = useMemo(
     () => {
@@ -546,7 +564,7 @@ export default function ProjectionModel({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
+              gridTemplateColumns: "1fr 1fr 1fr 1fr",
               gap: "1rem",
               marginBottom: "2rem",
             }}
@@ -588,6 +606,59 @@ export default function ProjectionModel({
               >
                 {result.equityIrr !== null ? formatPct(result.equityIrr * 100) : "N/A"}
               </div>
+            </div>
+
+            {/* Inception IRR card */}
+            <div
+              style={{
+                padding: "1.25rem",
+                background: equityInceptionData?.purchaseDate
+                  ? "linear-gradient(135deg, #059669 0%, #047857 100%)"
+                  : "var(--color-surface)",
+                borderRadius: "var(--radius-sm)",
+                textAlign: "center",
+                position: "relative",
+                overflow: "hidden",
+                border: equityInceptionData?.purchaseDate ? "none" : "1px solid var(--color-border)",
+              }}
+            >
+              <div style={{
+                fontSize: "0.7rem",
+                fontWeight: 500,
+                color: equityInceptionData?.purchaseDate ? "rgba(255,255,255,0.7)" : "var(--color-text-muted)",
+                marginBottom: "0.35rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}>
+                Inception IRR <span style={{ fontSize: "0.55rem", fontWeight: 400, letterSpacing: "0.02em", opacity: 0.7 }}>(actual)</span>
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "1.8rem",
+                  fontWeight: 700,
+                  color: equityInceptionData?.purchaseDate ? "#fff" : "var(--color-text-muted)",
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                {inceptionIrr !== null
+                  ? formatPct(inceptionIrr * 100)
+                  : "-- %"}
+              </div>
+              {equityInceptionData?.purchaseDate && inceptionIrr === null && (
+                <div style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.5)", marginTop: "0.2rem" }}>
+                  {equityInceptionData.payments.filter(p => p.distribution != null).length}/{equityInceptionData.payments.length} payments entered
+                </div>
+              )}
+              {!equityInceptionData?.purchaseDate && (
+                <Link
+                  href="/clo/context"
+                  style={{ fontSize: "0.65rem", color: "var(--color-accent)", marginTop: "0.2rem", display: "block" }}
+                >
+                  Set up in Context
+                </Link>
+              )}
             </div>
 
             <SummaryCard

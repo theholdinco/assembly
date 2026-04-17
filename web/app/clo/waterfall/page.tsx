@@ -137,6 +137,7 @@ export default async function WaterfallPage() {
         resolved={resolved}
         resolutionWarnings={resolutionWarnings}
         buyList={buyList}
+        equityInceptionData={profile.equityInceptionData}
       />
     </div>
   );
