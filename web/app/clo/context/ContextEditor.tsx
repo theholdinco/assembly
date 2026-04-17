@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   InlineText,
   InlineNumber,
@@ -304,6 +304,7 @@ export default function ContextEditor({
   const [inceptionDirty, setInceptionDirty] = useState(false);
   const [savingInception, setSavingInception] = useState(false);
 
+  const inceptionInitialized = useRef(false);
   useEffect(() => {
     if (!inceptionData.purchaseDate) return;
     const dates = generateQuarterlyDates(inceptionData.purchaseDate);
@@ -315,7 +316,10 @@ export default function ContextEditor({
       }));
       return { ...prev, payments: newPayments };
     });
-    setInceptionDirty(true);
+    if (inceptionInitialized.current) {
+      setInceptionDirty(true);
+    }
+    inceptionInitialized.current = true;
   }, [inceptionData.purchaseDate]);
 
   // --- Update helpers ---
