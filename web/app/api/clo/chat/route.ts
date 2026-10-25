@@ -93,6 +93,10 @@ export async function POST(request: NextRequest) {
     );
     if (convRows.length > 0) {
       existingMessages = convRows[0].messages || [];
+    } else {
+      // Not the caller's conversation (or it no longer exists): start a new one
+      // instead of writing into the id the client sent.
+      convId = null;
     }
   }
 
@@ -276,8 +280,8 @@ export async function POST(request: NextRequest) {
 
         if (convId) {
           await query(
-            `UPDATE clo_conversations SET messages = $1::jsonb, updated_at = now() WHERE id = $2`,
-            [JSON.stringify(updatedMessages), convId]
+            `UPDATE clo_conversations SET messages = $1::jsonb, updated_at = now() WHERE id = $2 AND profile_id = $3`,
+            [JSON.stringify(updatedMessages), convId, profile.id]
           );
         } else {
           const newConv = await query<{ id: string }>(
