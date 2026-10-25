@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { PanelMember } from "@/lib/clo/types";
 import AttachmentWidget, { type AttachedFile, type AttachmentWidgetHandle } from "@/components/AttachmentWidget";
 
@@ -239,7 +239,7 @@ export default function FollowUpChat({
         <div
           className="markdown-content"
           dangerouslySetInnerHTML={{
-            __html: marked.parse(content, { async: false }) as string,
+            __html: renderMarkdown(content),
           }}
         />
       );
@@ -248,7 +248,7 @@ export default function FollowUpChat({
       if (!block.speaker) {
         return (
           <div key={i} className="markdown-content" dangerouslySetInnerHTML={{
-            __html: marked.parse(block.content, { async: false }) as string,
+            __html: renderMarkdown(block.content),
           }} />
         );
       }
@@ -270,7 +270,7 @@ export default function FollowUpChat({
           <div
             className="markdown-content"
             dangerouslySetInnerHTML={{
-              __html: marked.parse(block.content, { async: false }) as string,
+              __html: renderMarkdown(block.content),
             }}
           />
         </div>

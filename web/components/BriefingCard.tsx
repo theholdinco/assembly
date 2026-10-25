@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 
 interface BriefingCardProps {
   product: "ic" | "clo";
@@ -173,7 +173,7 @@ export default function BriefingCard({ product }: BriefingCardProps) {
             color: "var(--color-text-secondary, var(--color-text))",
           }}
           dangerouslySetInnerHTML={{
-            __html: marked.parse(digest, { async: false }) as string,
+            __html: renderMarkdown(digest),
           }}
         />
       )}

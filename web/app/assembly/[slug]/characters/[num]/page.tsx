@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import { useAssembly, useAssemblyId } from "@/lib/assembly-context";
 import FollowUpModal from "@/components/FollowUpModal";
 import HighlightChat from "@/components/HighlightChat";
 import { buildCharacterMaps, initials, isSocrate } from "@/lib/character-utils";
 
 function md(text: string): string {
-  return marked.parse(text, { async: false }) as string;
+  return renderMarkdown(text);
 }
 
 function truncate(text: string, max: number): string {

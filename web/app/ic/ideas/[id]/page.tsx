@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import GeneratingProgress from "@/components/ic/GeneratingProgress";
 import IdeaCard from "@/components/ic/IdeaCard";
 import type { InvestmentIdea } from "@/lib/ic/types";
@@ -146,7 +146,7 @@ export default function IdeaSessionPage() {
           <div
             className="ic-gap-analysis markdown-content"
             dangerouslySetInnerHTML={{
-              __html: marked.parse(gapAnalysis, { async: false }) as string,
+              __html: renderMarkdown(gapAnalysis),
             }}
           />
         </section>

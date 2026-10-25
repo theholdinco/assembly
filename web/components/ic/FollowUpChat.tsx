@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { CommitteeMember } from "@/lib/ic/types";
 
 type Mode = "ask-committee" | "ask-member" | "debate";
@@ -204,7 +204,7 @@ export default function FollowUpChat({ evaluationId, members }: FollowUpChatProp
         <div
           className="markdown-content"
           dangerouslySetInnerHTML={{
-            __html: marked.parse(content, { async: false }) as string,
+            __html: renderMarkdown(content),
           }}
         />
       );
@@ -213,7 +213,7 @@ export default function FollowUpChat({ evaluationId, members }: FollowUpChatProp
       if (!block.speaker) {
         return (
           <div key={i} className="markdown-content" dangerouslySetInnerHTML={{
-            __html: marked.parse(block.content, { async: false }) as string,
+            __html: renderMarkdown(block.content),
           }} />
         );
       }
@@ -235,7 +235,7 @@ export default function FollowUpChat({ evaluationId, members }: FollowUpChatProp
           <div
             className="markdown-content"
             dangerouslySetInnerHTML={{
-              __html: marked.parse(block.content, { async: false }) as string,
+              __html: renderMarkdown(block.content),
             }}
           />
         </div>

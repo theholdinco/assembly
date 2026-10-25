@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import { useAssembly, useAssemblyId, useAssemblyAccess } from "@/lib/assembly-context";
 import type { DivergencePoint, FollowUpInsight } from "@/lib/types";
 import FollowUpModal from "@/components/FollowUpModal";
@@ -26,7 +26,7 @@ const INSIGHT_TYPE_COLORS: Record<FollowUpInsight["type"], string> = {
 };
 
 function md(text: string): string {
-  return marked.parse(text, { async: false }) as string;
+  return renderMarkdown(text);
 }
 
 interface CharacterStance {

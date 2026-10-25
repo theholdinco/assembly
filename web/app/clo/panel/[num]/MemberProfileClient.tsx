@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { PanelMember } from "@/lib/clo/types";
 import CloFollowUpModal from "@/components/clo/FollowUpModal";
 
@@ -23,7 +23,7 @@ interface MemberProfileClientProps {
 }
 
 function md(text: string): string {
-  return marked.parse(text, { async: false }) as string;
+  return renderMarkdown(text);
 }
 
 function riskColor(personality: string): string {

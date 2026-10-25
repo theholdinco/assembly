@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-helpers";
 import { query } from "@/lib/db";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { Topic } from "@/lib/types";
@@ -50,7 +50,7 @@ export async function GET(
     // CSS may not be available in all environments
   }
 
-  const md = (text: string) => marked.parse(text, { async: false }) as string;
+  const md = (text: string) => renderMarkdown(text);
 
   const sections: string[] = [];
 

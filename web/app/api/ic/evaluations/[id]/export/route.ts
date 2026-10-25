@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-helpers";
 import { query } from "@/lib/db";
 import { verifyEvaluationAccess } from "@/lib/ic/access";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { ParsedEvaluation, CommitteeMember } from "@/lib/ic/types";
 
 export async function GET(
@@ -53,7 +53,7 @@ export async function GET(
     ...(eval_.dynamic_specialists || []),
   ];
 
-  const md = (text: string) => marked.parse(text, { async: false }) as string;
+  const md = (text: string) => renderMarkdown(text);
   const esc = (text: string) =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
