@@ -44,21 +44,22 @@ export default async function AssemblyLayout({
     notFound();
   }
 
-  const { access } = await getAssemblyAccessBySlug(slug, user.id);
-  if (!access) {
+  const { access, assemblyId } = await getAssemblyAccessBySlug(slug, user.id);
+  if (!access || !assemblyId) {
     notFound();
   }
 
+  // Load by the authorised assembly id: slugs are only unique per owner.
   const [rows, followUpRows] = await Promise.all([
     query<AssemblyRow>(
-      "SELECT id, slug, topic_input, status, parsed_data, is_free_trial, trial_interactions_used FROM assemblies WHERE slug = $1 LIMIT 1",
-      [slug]
+      "SELECT id, slug, topic_input, status, parsed_data, is_free_trial, trial_interactions_used FROM assemblies WHERE id = $1",
+      [assemblyId]
     ),
     query<FollowUpRow>(
       `SELECT f.id, f.question, f.mode, f.response_md, f.context_page, f.created_at, f.insight
-       FROM follow_ups f JOIN assemblies a ON f.assembly_id = a.id
-       WHERE a.slug = $1 ORDER BY f.created_at ASC`,
-      [slug]
+       FROM follow_ups f
+       WHERE f.assembly_id = $1 ORDER BY f.created_at ASC`,
+      [assemblyId]
     ),
   ]);
 
