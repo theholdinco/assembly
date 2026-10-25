@@ -209,27 +209,36 @@ export async function POST(
   let members = [...standingMembers];
 
   let analysis: { title: string; borrower_name: string; raw_files: Record<string, string> } | undefined;
+  // Only an analysis that belongs to this panel may be linked to the follow-up.
+  let panelAnalysisId: string | null = null;
 
   if (analysisId) {
+    if (typeof analysisId !== "string") {
+      return NextResponse.json({ error: "Invalid analysisId" }, { status: 400 });
+    }
     const analyses = await query<{
+      id: string;
       title: string;
       borrower_name: string;
       raw_files: Record<string, string>;
       dynamic_specialists: PanelMember[];
     }>(
-      "SELECT title, borrower_name, raw_files, dynamic_specialists FROM clo_analyses WHERE id = $1 AND panel_id = $2",
+      "SELECT id, title, borrower_name, raw_files, dynamic_specialists FROM clo_analyses WHERE id = $1 AND panel_id = $2",
       [analysisId, id]
     );
 
-    if (analyses.length > 0) {
-      analysis = {
-        title: analyses[0].title,
-        borrower_name: analyses[0].borrower_name,
-        raw_files: analyses[0].raw_files,
-      };
-      const dynamicSpecialists = (analyses[0].dynamic_specialists || []) as PanelMember[];
-      members = [...standingMembers, ...dynamicSpecialists];
+    if (analyses.length === 0) {
+      return NextResponse.json({ error: "Analysis not found" }, { status: 400 });
     }
+
+    panelAnalysisId = analyses[0].id;
+    analysis = {
+      title: analyses[0].title,
+      borrower_name: analyses[0].borrower_name,
+      raw_files: analyses[0].raw_files,
+    };
+    const dynamicSpecialists = (analyses[0].dynamic_specialists || []) as PanelMember[];
+    members = [...standingMembers, ...dynamicSpecialists];
   }
 
   const profile: FullProfile = profiles[0] || {
@@ -337,7 +346,7 @@ export async function POST(
         await query(
           `INSERT INTO clo_follow_ups (panel_id, analysis_id, question, mode, target_member, response_md)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [id, analysisId || null, question, mode, targetMember || null, fullText]
+          [id, panelAnalysisId, question, mode, targetMember || null, fullText]
         );
       } catch (err) {
         console.error("[clo/panel-follow-ups] Failed to persist follow-up:", err);
