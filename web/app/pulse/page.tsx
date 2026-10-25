@@ -1,5 +1,7 @@
 import { getMovements } from "@/lib/pulse/access";
 import Link from "next/link";
+import { hasPulseAccess } from "@/lib/pulse/auth";
+import { PulseAccessGate } from "@/app/pulse/access-gate";
 
 const STAGE_COLORS: Record<string, string> = {
   detected: "pulse-stage-detected",
@@ -16,6 +18,9 @@ export default async function PulseDashboard({
 }: {
   searchParams: Promise<{ stage?: string; sort?: string; q?: string }>;
 }) {
+  // Checked here too: the layout is not re-run on client-side navigation.
+  if (!(await hasPulseAccess())) return <PulseAccessGate />;
+
   const params = await searchParams;
 
   const movements = await getMovements({

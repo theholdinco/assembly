@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMovements, type MovementFilters } from "@/lib/pulse/access";
+import { pulseUnauthorized } from "@/lib/pulse/auth";
 
 export async function GET(request: NextRequest) {
+  const unauthorized = await pulseUnauthorized();
+  if (unauthorized) return unauthorized;
+
   const { searchParams } = new URL(request.url);
 
   const filters: MovementFilters = {};
