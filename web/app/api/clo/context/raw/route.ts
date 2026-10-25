@@ -65,22 +65,27 @@ function camelToSnake(key: string): string {
   return key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
+// Builds the DB row for an imported record. Owner-derived columns
+// (fixedColumns: report_period_id, deal_id, tranche_id) always win: body keys
+// are compared after normalisation to the snake_case column name, keys that
+// map to a fixed column are ignored, and fixedColumns are applied last.
 function rowToDbColumns(
   row: Record<string, unknown>,
   columns: Set<string>,
   fixedColumns: Record<string, unknown>,
   skippedKeys: Set<string>,
 ): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...fixedColumns };
+  const skippedColumns = new Set(Array.from(skippedKeys, camelToSnake));
+  const next: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
-    if (skippedKeys.has(key)) continue;
     const column = camelToSnake(key);
+    if (skippedColumns.has(column) || hasOwn(fixedColumns, column)) continue;
     if (columns.has(column)) next[column] = value;
   }
   if (columns.has("data_source") && next.data_source == null) {
     next.data_source = "context_import";
   }
-  return next;
+  return { ...next, ...fixedColumns };
 }
 
 async function queryRows<T extends QueryResultRow = QueryResultRow>(
