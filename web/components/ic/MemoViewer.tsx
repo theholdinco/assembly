@@ -1,6 +1,6 @@
 "use client";
 
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { InvestmentMemo } from "@/lib/ic/types";
 
 interface MemoViewerProps {
@@ -26,7 +26,7 @@ export default function MemoViewer({ memo }: MemoViewerProps) {
             <div
               className="markdown-content"
               dangerouslySetInnerHTML={{
-                __html: marked.parse(section.content, { async: false }) as string,
+                __html: renderMarkdown(section.content),
               }}
             />
           </div>
@@ -41,7 +41,7 @@ export default function MemoViewer({ memo }: MemoViewerProps) {
         <div
           className="markdown-content"
           dangerouslySetInnerHTML={{
-            __html: marked.parse(memo.raw, { async: false }) as string,
+            __html: renderMarkdown(memo.raw),
           }}
         />
       </div>

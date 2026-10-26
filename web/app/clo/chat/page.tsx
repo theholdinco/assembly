@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import Link from "next/link";
 import AttachmentWidget, { type AttachedFile, type AttachmentWidgetHandle } from "@/components/AttachmentWidget";
 
@@ -239,7 +239,7 @@ function CLOChatInner() {
                   <div
                     className="markdown-content"
                     dangerouslySetInnerHTML={{
-                      __html: marked.parse(msg.content, { async: false }) as string,
+                      __html: renderMarkdown(msg.content),
                     }}
                   />
                 </div>

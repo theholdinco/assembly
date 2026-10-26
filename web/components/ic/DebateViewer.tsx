@@ -1,6 +1,6 @@
 "use client";
 
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { ICDebateRound, CommitteeMember } from "@/lib/ic/types";
 
 interface DebateViewerProps {
@@ -39,7 +39,7 @@ export default function DebateViewer({ rounds, members }: DebateViewerProps) {
                 <div
                   className="markdown-content"
                   dangerouslySetInnerHTML={{
-                    __html: marked.parse(exchange.content, { async: false }) as string,
+                    __html: renderMarkdown(exchange.content),
                   }}
                 />
               </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import { parseFollowUpResponse, getLoadingMessage } from "@/lib/follow-up-rendering";
 import { findAvatarUrl } from "@/lib/character-utils";
 import AttachmentWidget, { type AttachedFile } from "@/components/AttachmentWidget";
@@ -249,7 +249,7 @@ export default function HighlightChat({
               <div
                 className="markdown-content"
                 dangerouslySetInnerHTML={{
-                  __html: marked.parse(responseText, { async: false }) as string,
+                  __html: renderMarkdown(responseText),
                 }}
               />
             ) : (
@@ -268,7 +268,7 @@ export default function HighlightChat({
                   <div
                     className="debate-content"
                     dangerouslySetInnerHTML={{
-                      __html: marked.parse(block.content, { async: false }) as string,
+                      __html: renderMarkdown(block.content),
                     }}
                   />
                 </div>

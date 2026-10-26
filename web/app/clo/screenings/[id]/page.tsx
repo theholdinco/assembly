@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import GeneratingProgress from "@/components/clo/GeneratingProgress";
 import FollowUpChat from "@/components/clo/FollowUpChat";
 import type { LoanIdea, PanelMember } from "@/lib/clo/types";
@@ -233,7 +233,7 @@ export default function ScreeningSessionPage() {
           <div
             className="ic-gap-analysis markdown-content"
             dangerouslySetInnerHTML={{
-              __html: marked.parse(gapAnalysis, { async: false }) as string,
+              __html: renderMarkdown(gapAnalysis),
             }}
           />
         </section>

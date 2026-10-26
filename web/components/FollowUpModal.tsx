@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import { parseFollowUpResponse, getLoadingMessage } from "@/lib/follow-up-rendering";
 import { findAvatarUrl } from "@/lib/character-utils";
 import AttachmentWidget, { type AttachedFile, type AttachmentWidgetHandle } from "@/components/AttachmentWidget";
@@ -264,7 +264,7 @@ export default function FollowUpModal({
         <div
           className="markdown-content"
           dangerouslySetInnerHTML={{
-            __html: marked.parse(content, { async: false }) as string,
+            __html: renderMarkdown(content),
           }}
         />
       );
@@ -284,7 +284,7 @@ export default function FollowUpModal({
           <div
             className="debate-content"
             dangerouslySetInnerHTML={{
-              __html: marked.parse(block.content, { async: false }) as string,
+              __html: renderMarkdown(block.content),
             }}
           />
         </div>

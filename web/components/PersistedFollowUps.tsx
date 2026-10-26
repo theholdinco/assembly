@@ -1,6 +1,6 @@
 "use client";
 
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/markdown";
 import type { FollowUp, Character } from "@/lib/types";
 
 const AVATAR_COLORS = [
@@ -17,7 +17,7 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 function md(text: string): string {
-  return marked.parse(text, { async: false }) as string;
+  return renderMarkdown(text);
 }
 
 function initials(name: string): string {
