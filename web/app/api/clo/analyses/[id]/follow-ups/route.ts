@@ -149,8 +149,13 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Rows written from a panel must come from this analysis's own panel; rows
+  // written by this route have no panel_id.
   const followUps = await query(
-    "SELECT * FROM clo_follow_ups WHERE analysis_id = $1 ORDER BY created_at ASC",
+    `SELECT f.* FROM clo_follow_ups f
+     JOIN clo_analyses a ON a.id = f.analysis_id
+     WHERE f.analysis_id = $1 AND (f.panel_id IS NULL OR f.panel_id = a.panel_id)
+     ORDER BY f.created_at ASC`,
     [id]
   );
 
