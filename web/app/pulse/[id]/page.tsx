@@ -1,6 +1,8 @@
 import { getMovementById, getSignalsForMovement } from "@/lib/pulse/access";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { hasPulseAccess } from "@/lib/pulse/auth";
+import { PulseAccessGate } from "@/app/pulse/access-gate";
 
 const STAGE_COLORS: Record<string, string> = {
   detected: "pulse-stage-detected",
@@ -26,6 +28,9 @@ export default async function MovementDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // Checked here too: the layout is not re-run on client-side navigation.
+  if (!(await hasPulseAccess())) return <PulseAccessGate />;
+
   const { id } = await params;
   const movement = await getMovementById(id);
 

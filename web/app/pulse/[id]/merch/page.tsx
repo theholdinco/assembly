@@ -1,6 +1,8 @@
 import { getMovementById } from "@/lib/pulse/access";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { hasPulseAccess } from "@/lib/pulse/auth";
+import { PulseAccessGate } from "@/app/pulse/access-gate";
 import { generateProducts, type Product, type ProductType } from "./products";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -86,6 +88,9 @@ export default async function MerchPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // Checked here too: the layout is not re-run on client-side navigation.
+  if (!(await hasPulseAccess())) return <PulseAccessGate />;
+
   const { id } = await params;
   const movement = await getMovementById(id);
 

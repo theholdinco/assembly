@@ -1,13 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { pulseUnauthorized } from "@/lib/pulse/auth";
 
 const MIN_SCAN_INTERVAL_MINUTES = 10;
 
-export async function POST(request: NextRequest) {
-  const accessCookie = request.cookies.get("pulse_access");
-  if (accessCookie?.value !== "granted") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function POST() {
+  const unauthorized = await pulseUnauthorized();
+  if (unauthorized) return unauthorized;
 
   const recent = await query<{ id: string }>(
     `SELECT id FROM pulse_scans
